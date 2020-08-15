@@ -1,0 +1,20 @@
+package stem.journal
+
+import zio.Task
+import zio.stream.Stream
+
+// we need to store offset and snapshot
+trait EventStateStore[Key, Event, State] {
+  type Offset = Long
+
+  def clear(): Task[Unit]
+
+  def appendEvent(key: Key, event: Event, offset: Offset): Task[Unit]
+
+  def read(key: Key, offset: Offset): Stream[Throwable, Event]
+
+  def readState: Task[(State, Offset)]
+
+  def snapshotState(state: State): Task[Unit]
+
+}

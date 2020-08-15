@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ledger.eventsourcing.events;
+
+message LedgerEvent {
+
+  oneof sealed_value {
+    AmountLocked left = 1;
+    LockReleased right = 2;
+  }
+}
+
+message AmountLocked {
+  BigDecimal amount = 1;
+  string idempotencyKey = 2;
+}
+
+message LockReleased {
+}
+
+message BigDecimal {
+   uint64 scale = 1;
+   int32 precision = 2;
+}

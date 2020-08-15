@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package ledger.communication.grpc;
+
+import "events.proto";
+
+// The ledger service definition.
+service Ledger {
+    rpc Lock (LockRequest) returns (LockReply) {}
+    rpc Release (ReleaseRequest) returns (ReleaseReply) {}
+    rpc Clear (ClearRequest) returns (ClearReply) {}
+}
+
+// The request message containing the user's name.
+message LockRequest {
+    string id = 1;
+    string accountId = 2;
+    ledger.eventsourcing.events.BigDecimal amount = 3;
+    string idempotencyKey = 4;
+}
+
+// The response message containing the greetings
+message LockReply {
+    string message = 1;
+}
+
+// The request message containing the user's name.
+message ReleaseRequest {
+    string id = 1;
+    string accountId = 2;
+}
+
+// The response message containing the greetings
+message ReleaseReply {
+    string message = 1;
+}
+
+// The request message containing the user's name.
+message ClearRequest {
+    string id = 1;
+    string accountId = 2;
+}
+
+// The response message containing the greetings
+message ClearReply {
+    string message = 1;
+}
