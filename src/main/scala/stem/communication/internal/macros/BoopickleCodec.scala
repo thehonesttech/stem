@@ -13,8 +13,8 @@ object BoopickleCodec {
       Attempt.successful(BitVector(Pickle.intoBytes(value)))
     override def sizeBound: SizeBound = SizeBound.unknown
   }
-  def decoder[A](implicit pickler: Pickler[A]): Decoder[A] = new Decoder[A] {
-    override def decode(bits: BitVector): Attempt[DecodeResult[A]] =
+  def decoder[A](implicit pickler: Pickler[A]): Decoder[A] =
+    (bits: BitVector) =>
       Unpickle
         .apply[A]
         .tryFromBytes(bits.toByteBuffer)
@@ -22,7 +22,6 @@ object BoopickleCodec {
           s => Attempt.failure(Err(s.getMessage)),
           a => Attempt.successful(DecodeResult(a, BitVector.empty))
         )
-  }
 
   def codec[A](implicit pickler: Pickler[A]): Codec[A] = Codec(encoder[A], decoder[A])
 

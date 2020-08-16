@@ -1,12 +1,12 @@
 package stem.communication.internal.macros
 
 import boopickle.Default._
-import ledger.LedgersEntity.LedgerCommandHandler
+import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.LockResponse
 import ledger.eventsourcing.events.events.LedgerEvent
 import scodec.bits.BitVector
 import stem.communication.internal.macros.BoopickleCodec._
-import stem.engine.{AlgebraCombinators, Invocation}
+import stem.runtime.{AlgebraCombinators, Invocation}
 import zio.{Has, Task, ZIO}
 
 object RpcMacro {

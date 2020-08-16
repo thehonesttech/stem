@@ -2,17 +2,17 @@ package ledger
 
 import akka.actor.ActorSystem
 import io.grpc.Status
-import ledger.LedgerService.Service.Ledgers
-import ledger.LedgersEntity.LedgerCommandHandler
+import ledger.LedgerEntity.LedgerCommandHandler
+import ledger.communication.grpc.service.ZioService.ZLedger
 import ledger.communication.grpc.service._
 import ledger.eventsourcing.events.events
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleased}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
-import stem.engine.AlgebraCombinators.Combinators
-import stem.engine.akka.StemRuntime.memoryStemtity
-import stem.engine.akka._
-import stem.engine.{AlgebraCombinators, Fold}
+import stem.runtime.AlgebraCombinators.Combinators
+import stem.runtime.akka.StemRuntime.memoryStemtity
+import stem.runtime.akka._
+import stem.runtime.{AlgebraCombinators, AlgebraTransformer, Fold}
 import stem.tagging.{EventTag, Tagging}
 import zio.{Has, Managed, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
 
@@ -32,19 +32,14 @@ object LedgerServer extends ServerMain {
   private val liveAlgebra: ULayer[Combinators[Int, LedgerEvent, String]] = ZLayer.succeed(StemApp.emptyAlgebra[Int, LedgerEvent, String])
 
   // dependency injection wiring
-  private val buildSystem = {
-    ((ZEnv.live and actorSystem and runtimeSettings to LedgersEntity.live) and liveAlgebra to LedgerService.live).build.use { layer =>
-      ZIO.access[ZEnv] { _ =>
-        layer.get
-      }
-    }
-  }
+  private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
+    ((actorSystem and runtimeSettings to LedgerEntity.live) and liveAlgebra to LedgerService.live)
 
-  override def services: ServiceList[zio.ZEnv] =
-    ServiceList.addM(buildSystem)
+  override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
 
-object LedgersEntity {
+// you can have multiples entities
+object LedgerEntity {
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
   implicit val keyEncoder: KeyEncoder[String] = (a: String) => a
   implicit val keyDecoder: KeyDecoder[String] = (key: String) => Some(key)
@@ -85,24 +80,21 @@ object LedgersEntity {
     })
   }
 
-  private val eventSourcedBehaviour: EventSourcedBehaviour[LedgerCommandHandler, Int, LedgerEvent, String] =
-    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEventHandler.eventHandlerLogic, errorHandler)
-
+  // TODO: setup kafka
   val live = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
       "Ledger",
       Tagging.const(EventTag("Ledger")),
-      eventSourcedBehaviour
+      EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEventHandler.eventHandlerLogic, errorHandler)
     )
   }
 }
 
 object LedgerService {
 
-  type Service = ZioService.ZLedger[ZEnv with Combinators[Int, LedgerEvent, String], Any]
+  type Ledgers = String => LedgerCommandHandler
 
-  object Service {
-    type Ledgers = String => LedgerCommandHandler
+  object Conversions {
 
     implicit def toLedgerBigDecimal(bigDecimal: BigDecimal): events.BigDecimal =
       ledger.eventsourcing.events.events.BigDecimal(bigDecimal.scale, bigDecimal.precision)
@@ -114,26 +106,25 @@ object LedgerService {
 
   val live =
     ZLayer.fromServices { (ledgers: Ledgers, algebra: AlgebraCombinators[Int, LedgerEvent, String]) =>
-      new ZioService.ZLedger[ZEnv, Any] {
-        import Service._
+      val ledgerService = new ZioService.ZLedger[ZEnv with Combinators[Int, LedgerEvent, String], Any] {
+        import Conversions._
         import zio.console._
 
-        override def lock(request: LockRequest): ZIO[ZEnv, Status, LockReply] = {
+        override def lock(request: LockRequest): ZIO[ZEnv with Combinators[Int, LedgerEvent, String], Status, LockReply] = {
           (for {
             reply <- ledgers(request.id)
               .lock(request.amount, request.idempotencyKey)
             _ <- putStrLn(reply.toString)
           } yield LockReply().withMessage(reply.toString))
             .mapError(_ => Status.NOT_FOUND)
-            //TODO: I DON'T WANT TO DEAL WITH THIS (APART FROM TESTS)
-            .provideCustomLayer(ZLayer.succeed(algebra))
         }
 
-        override def release(request: ReleaseRequest): ZIO[ZEnv, Status, ReleaseReply] =
+        override def release(request: ReleaseRequest): ZIO[ZEnv with Combinators[Int, LedgerEvent, String], Status, ReleaseReply] =
           ???
 
-        override def clear(request: ClearRequest): ZIO[ZEnv, Status, ClearReply] = ???
+        override def clear(request: ClearRequest): ZIO[ZEnv with Combinators[Int, LedgerEvent, String], Status, ClearReply] = ???
       }
+      AlgebraTransformer.withAlgebra(ledgerService, algebra)
     }
 
 }

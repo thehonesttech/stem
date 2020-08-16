@@ -1,5 +1,5 @@
 package stem.journal
-import stem.engine.readside.JournalQuery
+import stem.runtime.readside.JournalQuery
 import stem.tagging.EventTag
 import zio._
 import zio.clock.Clock

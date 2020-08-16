@@ -1,4 +1,4 @@
-package stem.engine.readside
+package stem.runtime.readside
 
 import stem.journal.EntityEvent
 import stem.tagging.EventTag

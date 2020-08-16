@@ -1,6 +1,6 @@
 package stem
 
-import stem.engine.AlgebraCombinators
+import stem.runtime.AlgebraCombinators
 import zio.{IO, Task, ZIO}
 
 // idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error

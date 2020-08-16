@@ -1,4 +1,4 @@
-package stem.engine
+package stem.runtime
 
 import izumi.reflect.Tag
 import stem.journal.{EventJournal, MemoryEventJournal}

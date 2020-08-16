@@ -1,4 +1,4 @@
-package stem.engine.akka
+package stem.runtime.akka
 
 import java.util.concurrent.TimeUnit
 
@@ -9,9 +9,9 @@ import akka.util.Timeout
 import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.communication.internal.macros.RpcMacro
-import stem.engine.BaseAlgebraCombinators
-import stem.engine.LiveBaseAlgebraCombinators.memory
-import stem.engine.akka.serialization.Message
+import stem.runtime.BaseAlgebraCombinators
+import stem.runtime.LiveBaseAlgebraCombinators.memory
+import stem.runtime.akka.serialization.Message
 import stem.tagging.Tagging
 import zio.{Has, Runtime, Task, ZEnv, ZIO}
 
@@ -111,7 +111,7 @@ object RuntimeSettings {
     * @return default settings
     */
   def default(system: ActorSystem): RuntimeSettings = {
-    val config = system.settings.config.getConfig("aecor.generic-akka-runtime")
+    val config = system.settings.config.getConfig("stem.akka-runtime")
     def getMillisDuration(path: String): FiniteDuration =
       Duration(config.getDuration(path, TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 

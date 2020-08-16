@@ -1,4 +1,4 @@
-package stem.engine.akka
+package stem.runtime.akka
 
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -7,7 +7,7 @@ import akka.actor.{Actor, ActorLogging, Props, Stash}
 import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.communication.internal.macros.RpcMacro
-import stem.engine.{AlgebraCombinators, BaseAlgebraCombinators, Fold, Invocation}
+import stem.runtime.{AlgebraCombinators, BaseAlgebraCombinators, Fold, Invocation}
 import zio.{Has, Runtime, Task, ZEnv, ZLayer}
 
 object StemActor {

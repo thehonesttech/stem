@@ -1,6 +1,6 @@
 package stem.snapshot
 
-import stem.engine.Versioned
+import stem.runtime.Versioned
 import zio.Task
 
 final class SnapshotEach[K, S](interval: Long, store: KeyValueStore[K, Versioned[S]]) extends Snapshotting[K, S] {

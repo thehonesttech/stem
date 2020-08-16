@@ -1,11 +1,11 @@
-package stem.engine.akka.serialization
+package stem.runtime.akka.serialization
 
 import akka.actor.ExtendedActorSystem
 import akka.serialization.{BaseSerializer, SerializerWithStringManifest}
 import com.google.protobuf.ByteString
 import scodec.bits.BitVector
-import stem.engine.akka.{CommandInvocation, CommandResult}
-import stem.engine.akka.StemRuntime.KeyedCommand
+import stem.runtime.akka.{CommandInvocation, CommandResult}
+import stem.runtime.akka.StemRuntime.KeyedCommand
 
 import scala.collection.immutable.HashMap
 
