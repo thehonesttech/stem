@@ -106,7 +106,7 @@ final case class RuntimeSettings(
 object RuntimeSettings {
 
   /**
-    * Reads config from `aecor.akka-runtime`, see reference.conf for details
+    * Reads config from `stem.akka-runtime`, see stem.conf for details
     * @param system Actor system to get config from
     * @return default settings
     */

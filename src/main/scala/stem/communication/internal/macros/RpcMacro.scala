@@ -1,9 +1,12 @@
 package stem.communication.internal.macros
 
+import akka.protobuf.GeneratedMessage
 import boopickle.Default._
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.LockResponse
+import ledger.communication.grpc.service.LockReply
 import ledger.eventsourcing.events.events.LedgerEvent
+import scalapb.GeneratedMessage
 import scodec.bits.BitVector
 import stem.communication.internal.macros.BoopickleCodec._
 import stem.runtime.{AlgebraCombinators, Invocation}
@@ -30,6 +33,10 @@ object LedgerRpcMacro {
         val hint = 1
 
         val tuple: (BigDecimal, String) = (amount, idempotencyKey)
+
+        // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
+        // LockReply.validate()
+
         val codecInput = codec[(BigDecimal, String)]
         val codecResult = codec[LockResponse]
 

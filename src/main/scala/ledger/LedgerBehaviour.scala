@@ -1,6 +1,7 @@
 package ledger
 
 import akka.actor.ActorSystem
+import com.typesafe.config.ConfigFactory
 import io.grpc.Status
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.communication.grpc.service.ZioService.ZLedger
@@ -9,6 +10,7 @@ import ledger.eventsourcing.events.events
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleased}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
+import stem.annotations.MethodId
 import stem.runtime.AlgebraCombinators.Combinators
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
@@ -23,13 +25,15 @@ case class Denied(reason: String) extends LockResponse
 object LedgerServer extends ServerMain {
 
   private val actorSystem =
-    ZLayer.fromManaged(Managed.make(Task(ActorSystem("System")))(sys => Task.fromFuture(_ => sys.terminate()).either))
+    ZLayer.fromManaged(
+      Managed.make(Task(ActorSystem("System", ConfigFactory.load("stem.conf"))))(sys => Task.fromFuture(_ => sys.terminate()).either)
+    )
 
-  private val runtimeSettings = actorSystem to ZLayer.fromFunction { actorSystem: Has[ActorSystem] =>
-      RuntimeSettings.default(actorSystem.get)
+  private val runtimeSettings = actorSystem to ZLayer.fromService { actorSystem: ActorSystem =>
+      RuntimeSettings.default(actorSystem)
     }
 
-  private val liveAlgebra: ULayer[Combinators[Int, LedgerEvent, String]] = ZLayer.succeed(StemApp.emptyAlgebra[Int, LedgerEvent, String])
+  private val liveAlgebra = StemApp.liveAlgebraLayer[Int, LedgerEvent, String]
 
   // dependency injection wiring
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
@@ -47,6 +51,7 @@ object LedgerEntity {
   class LedgerCommandHandler {
     type SIO[Response] = ZIO[Combinators[Int, LedgerEvent, String], String, Response]
 
+    @MethodId(1)
     def lock(amount: BigDecimal, idempotencyKey: String): SIO[LockResponse] = ZIO.accessM { opsL =>
       val ops = opsL.get
       import ops._
@@ -56,8 +61,10 @@ object LedgerEntity {
       } yield Allowed).mapError(errorHandler)
     }
 
+    @MethodId(2)
     def release(transactionId: String, idempotencyKey: String): SIO[Unit] = ???
 
+    @MethodId(3)
     def clear(transactionId: String, idempotencyKey: String): SIO[Unit] = ???
 
     private def toLedgerBigDecimal(bigDecimal: BigDecimal): events.BigDecimal =
