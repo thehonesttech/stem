@@ -73,26 +73,27 @@ object LedgerEntity {
 
   private val errorHandler: Throwable => String = error => error.getMessage
 
-  object LedgerEventHandler {
-    private val initialState = 0
-
-    val eventHandlerLogic: Fold[Int, LedgerEvent] = Fold(initialState, reduce = {
-      case (state, event) =>
+  val eventHandlerLogic: Fold[Int, LedgerEvent] = Fold(
+    initial = 0,
+    reduce = {
+      case (oldState, event) =>
         val newState = event match {
-          case _: AmountLocked => 1
+          case _: AmountLocked =>
+            if (oldState % 2 == 0) oldState + 1
+            else oldState + 5
           case _: LockReleased => 2
           case _               => 3
         }
         Task.succeed(newState)
-    })
-  }
+    }
+  )
 
   // TODO: setup kafka
   val live = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
       "Ledger",
       Tagging.const(EventTag("Ledger")),
-      EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEventHandler.eventHandlerLogic, errorHandler)
+      EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
     )
   }
 }

@@ -138,7 +138,7 @@ object LiveBaseAlgebraCombinators {
   }
 }
 
-// this is event handling
+// TODO: can the output be a Task or must it be a State?
 final case class Fold[State, Event](initial: State, reduce: (State, Event) => Task[State]) {
   def init(a: State): Fold[State, Event] = copy(initial = a)
 
