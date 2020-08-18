@@ -7,7 +7,7 @@ lazy val commonProtobufSettings = Seq(
       baseDirectory.value / "src/schemas/protobuf"
     ),
   PB.targets in Compile := Seq(
-      scalapb.gen(grpc = true)          -> (sourceManaged in Compile).value,
+      scalapb.gen(grpc = true, flatPackage = false)          -> (sourceManaged in Compile).value,
       scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value
     )
 )
@@ -27,7 +27,7 @@ lazy val `core` = stemModule("core", "Core framework")
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
-lazy val `readside` = stemModule("readside", "Read side views").settings(libraryDependencies ++= allDeps)
+lazy val `readside` = stemModule("readside", "Read side views").settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
 lazy val `example` = stemModule("example", "Ledger example").dependsOn(`core`, `macros`).settings(commonProtobufSettings)
 

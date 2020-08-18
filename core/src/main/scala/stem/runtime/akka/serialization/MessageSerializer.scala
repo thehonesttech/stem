@@ -46,11 +46,11 @@ class MessageSerializer(val system: ExtendedActorSystem) extends SerializerWithS
     }
 
   private def entityCommandToBinary(a: KeyedCommand): Array[Byte] =
-    msg.StemRuntime.KeyedCommand(a.key, ByteString.copyFrom(a.bytes.toByteBuffer)).toByteArray
+    msg.stemruntime.KeyedCommand(a.key, ByteString.copyFrom(a.bytes.toByteBuffer)).toByteArray
 
   private def keyedCommandFromBinary(bytes: Array[Byte]): KeyedCommand =
-    msg.StemRuntime.KeyedCommand.parseFrom(bytes) match {
-      case msg.StemRuntime.KeyedCommand(key, commandBytes, _) =>
+    msg.stemruntime.KeyedCommand.parseFrom(bytes) match {
+      case msg.stemruntime.KeyedCommand(key, commandBytes, _) =>
         KeyedCommand(key, BitVector(commandBytes.asReadOnlyByteBuffer()))
     }
 
