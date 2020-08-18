@@ -18,7 +18,7 @@ import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
 import stem.runtime.{AlgebraTransformer, Fold, StemProtocol}
 import stem.tagging.{EventTag, Tagging}
-import zio.{Has, Managed, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, Managed, Runtime, Task, ZEnv, ZIO, ZLayer}
 
 sealed trait LockResponse
 case object Allowed extends LockResponse
