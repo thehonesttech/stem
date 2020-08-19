@@ -91,7 +91,7 @@ object LedgerEntity {
   )
 
   implicit val ledgerProtocol
-    : StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] = LedgerRpcMacro.ledgerProtocol // we need to invoke the macro, for now, we can put the manual macro instead
+    : StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] = LedgerRpcMacro.ledgerProtocol  // we need to invoke the macro, for now, we can put the manual macro instead
   // TODO: setup kafka
   val live = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](

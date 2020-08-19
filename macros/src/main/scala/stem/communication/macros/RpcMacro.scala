@@ -1,14 +1,10 @@
 package stem.communication.macros
 
-import boopickle.Default._
-import izumi.reflect.WeakTag
 import scodec.bits.BitVector
-import stem.communication.macros.BoopickleCodec._
 import stem.data.Invocation
-import zio.{Has, Task, ZIO}
+import zio.Task
 
 import scala.language.experimental.macros
-import scala.reflect.ClassTag
 
 object RpcMacro {
 
