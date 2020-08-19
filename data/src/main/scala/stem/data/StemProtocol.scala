@@ -1,7 +1,6 @@
-package stem.runtime
+package stem.data
 
 import scodec.bits.BitVector
-import stem.data.Invocation
 import zio.Task
 
 trait StemProtocol[Algebra, State, Event, Reject] {

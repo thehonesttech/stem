@@ -6,8 +6,7 @@ import ledger.LockResponse
 import ledger.eventsourcing.events.events.LedgerEvent
 import scodec.bits.BitVector
 import stem.communication.macros.BoopickleCodec.{codec, _}
-import stem.data.{AlgebraCombinators, Invocation}
-import stem.runtime.StemProtocol
+import stem.data.{AlgebraCombinators, Invocation, StemProtocol}
 import zio.{Has, Task, ZIO}
 
 object LedgerRpcMacro {

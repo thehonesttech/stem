@@ -12,11 +12,11 @@ import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
 import stem.annotations.MethodId
 import stem.communication.macros.LedgerRpcMacro
-import stem.data.AlgebraCombinators
 import stem.data.AlgebraCombinators.Combinators
+import stem.data.{AlgebraCombinators, StemProtocol}
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
-import stem.runtime.{AlgebraTransformer, Fold, StemProtocol}
+import stem.runtime.{AlgebraTransformer, Fold}
 import stem.tagging.{EventTag, Tagging}
 import zio.{Has, Managed, Runtime, Task, ZEnv, ZIO, ZLayer}
 

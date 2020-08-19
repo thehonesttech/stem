@@ -6,8 +6,9 @@ import java.nio.charset.StandardCharsets
 import akka.actor.{Actor, ActorLogging, Props, Stash}
 import izumi.reflect.Tag
 import scodec.bits.BitVector
+import stem.data.StemProtocol
 import stem.data.{AlgebraCombinators, Invocation}
-import stem.runtime.{BaseAlgebraCombinators, Fold, StemProtocol}
+import stem.runtime.{BaseAlgebraCombinators, Fold}
 import zio.{Has, Runtime, Task, ZEnv, ZLayer}
 
 object StemActor {

@@ -8,7 +8,8 @@ import akka.pattern.ask
 import akka.util.Timeout
 import izumi.reflect.Tag
 import scodec.bits.BitVector
-import stem.runtime.{BaseAlgebraCombinators, StemProtocol}
+import stem.data.StemProtocol
+import stem.runtime.BaseAlgebraCombinators
 import stem.runtime.LiveBaseAlgebraCombinators.memory
 import stem.runtime.akka.serialization.Message
 import stem.tagging.Tagging
