@@ -15,6 +15,12 @@ class DeriveMacrosSpec extends AnyFreeSpec {
     "called with generic type" in {
 //      callMacro[AlgebraImpl]
     }
+
+    "called proto macro" in {
+      import scala.reflect.runtime.universe.showRaw
+
+//      val macr = RpcMacro.derive
+    }
   }
 
   private def callMacro[Algebra] = {
