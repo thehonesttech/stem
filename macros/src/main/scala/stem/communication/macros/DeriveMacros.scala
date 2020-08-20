@@ -67,7 +67,33 @@ class DeriveMacros(c: blackbox.Context) {
         )
       }
 
-  def stubMethods(methods: Iterable[Method]): Iterable[c.universe.Tree] = ???
+  def stubMethods(methods: Iterable[Method]): Iterable[c.universe.Tree] = {
+   methods.zipWithIndex.map{
+     case (method, index)  =>
+       val newBody = q""" ZIO.accessM { _: Has[AlgebraCombinators[Int, LedgerEvent, String]] =>
+                                       val hint = 1
+
+                                       val tuple: (BigDecimal, String) = (amount, idempotencyKey)
+
+                                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
+                                       // LockReply.validate()
+
+                                       val codecInput = codec[(BigDecimal, String)]
+                                       val codecResult = codec[LockResponse]
+
+                                       (for {
+                                         tupleEncoded <- Task.fromTry(codecInput.encode(tuple).toTry)
+                                         // start common code
+                                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry)
+                                         vector    <- commFn(arguments)
+                                         // end of common code
+                                         decoded <- Task.fromTry(codecResult.decodeValue(vector).toTry)
+                                       } yield decoded).mapError(errorHandler)
+                                     }"""
+
+   }
+   ???
+  }
 
   def derive[Algebra, State, Event, Reject](
                                              implicit tag: c.WeakTypeTag[Algebra],
