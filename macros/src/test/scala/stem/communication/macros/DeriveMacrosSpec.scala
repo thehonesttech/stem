@@ -1,8 +1,8 @@
 package stem.communication.macros
 
 import org.scalatest.freespec.AnyFreeSpec
-import stem.data.StemProtocol
-import zio.Task
+import stem.data.{AlgebraCombinators, StemProtocol}
+import zio.{Has, IO, Task, ZIO}
 
 import scala.reflect.ClassTag
 
@@ -18,7 +18,9 @@ class DeriveMacrosSpec extends AnyFreeSpec {
 }
 
 class AlgebraImpl {
-  def operation1(param: String): Task[String] = Task.succeed(param)
+  type SIO[Return] = ZIO[Has[AlgebraCombinators[String, String, String]], String, Return]
+
+  def operation1(param: String): SIO[String] = IO.succeed(param)
 }
 
 object AlgebraImpl {

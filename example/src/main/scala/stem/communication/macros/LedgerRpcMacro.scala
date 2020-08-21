@@ -7,7 +7,7 @@ import ledger.LockResponse
 import ledger.eventsourcing.events.events.LedgerEvent
 import scodec.bits.BitVector
 import stem.data.{AlgebraCombinators, Invocation, StemProtocol}
-import zio.{Has, Task, ZIO}
+import zio.{Has, IO, Task, ZIO}
 
 object LedgerRpcMacro {
 
@@ -48,24 +48,30 @@ object LedgerRpcMacro {
 
         }
 
+
+
       val server: (LedgerCommandHandler, Throwable => String) => Invocation[Int, LedgerEvent, String] =
         (algebra: LedgerCommandHandler, errorHandler: Throwable => String) =>
           new Invocation[Int, LedgerEvent, String] {
+           val codecInput = codec[(BigDecimal, String)]
+           val codecResult = codec[LockResponse]
+            private def macroInvocation(arguments: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], String, BitVector] ={
+              for {
+                input <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
+                result <- (algebra.lock _).tupled(input)
+                vector <- Task.fromTry(codecResult.encode(result).toTry).mapError(errorHandler)
+              } yield vector
+            }
+
             override def call(message: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], String, BitVector] = {
               // for each method extract the name, it could be a sequence number for the method
-              ZIO.accessM { algebraOps =>
                 // according to the hint, extract the arguments
                 for {
                   element <- Task.fromTry(mainCodec.decodeValue(message).toTry).mapError(errorHandler)
                   (hint, arguments) = element
                   //use extractedHint to decide what to do here
-                  codecInput = codec[(BigDecimal, String)]
-                  codecResult = codec[LockResponse]
-                  input  <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
-                  result <- (algebra.lock _).tupled(input)
-                  vector <- Task.fromTry(codecResult.encode(result).toTry).mapError(errorHandler)
+                  vector <- macroInvocation(arguments)
                 } yield vector
-              }
             }
         }
     }

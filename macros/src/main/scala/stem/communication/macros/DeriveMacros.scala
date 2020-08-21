@@ -31,7 +31,7 @@ class DeriveMacros(val c: blackbox.Context) {
       m =>
         m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
           m.owner
-      )
+        )
     )
   }
 
@@ -66,7 +66,7 @@ class DeriveMacros(val c: blackbox.Context) {
       val tpe = member.asType
       val signature = tpe.typeSignatureIn(algebra)
       val typeParams = for (t <- signature.typeParams) yield typeDef(t)
-      val typeArgs = for (t   <- signature.typeParams) yield typeRef(NoPrefix, t, Nil)
+      val typeArgs = for (t <- signature.typeParams) yield typeRef(NoPrefix, t, Nil)
       q"type ${tpe.name}[..$typeParams] = ${rhs(tpe, typeArgs)}"
     }
 
@@ -88,42 +88,35 @@ class DeriveMacros(val c: blackbox.Context) {
   }
 
   def stubMethodsForClient(
-    methods: Iterable[Method],
-    state: c.universe.Type,
-    event: c.universe.Type,
-    reject: c.universe.Type
-  ): Iterable[c.universe.Tree] = {
+                            methods: Iterable[Method],
+                            state: c.universe.Type,
+                            event: c.universe.Type,
+                            reject: c.universe.Type
+                          ): Iterable[c.universe.Tree] = {
     methods.zipWithIndex.map {
-      case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _), index) =>
+      case (method@Method(_, _, paramList, TypeRef(_, _, outParams), _), index) =>
         val out = outParams.last
         val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
-        println(s"Processing ${method.m.toString} with argList ${argList}")
 
-        val argsTerm = {
-          if (argList.isEmpty) q""
-          else {
-            val paramTypes = paramList.flatten.map(_.tpt)
-            val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
-            // return tuple with try in the state of unpickle generic
-            //we should unpickle the result as well
-            println(s"In Codec Tuple ${TupleNCons}")
+        val paramTypes = paramList.flatten.map(_.tpt)
+        val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+        val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
+        val args = method.argLists((pn, _) => Ident(pn)).flatten
 
-            val args = method.argLists((pn, _) => Ident(pn)).flatten
-            q"""
-               val codecInput = codec[$TupleNCons[..$paramTypes]]
-               val codecResult = codec[$out]
-               val tuple = (..$args)
-               """
-          }
-        }
-        val newBody = q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
+
+        // TODO: missing empty args
+        val newBody =
+          q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
                        val hint = $index
 
-                       $argsTerm
-                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
+                       val codecInput = codec[$TupleNCons[..$paramTypes]]
+                       val codecResult = codec[$out]
+                       val tuple: $TupleNCons[..$paramTypes] = $TupleNConsTerm(..$args)
 
+                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
                        (for {
                          tupleEncoded <- Task.fromTry(codecInput.encode(tuple).toTry)
+
                          // start common code
                          arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry)
                          vector    <- commFn(arguments)
@@ -136,20 +129,19 @@ class DeriveMacros(val c: blackbox.Context) {
   }
 
   def derive[Algebra, State, Event, Reject](
-    implicit tag: c.WeakTypeTag[Algebra],
-    statetag: c.WeakTypeTag[State],
-    eventtag: c.WeakTypeTag[Event],
-    rejecttag: c.WeakTypeTag[Reject]
-  ): c.Tree = {
+                                             implicit algebraTag: c.WeakTypeTag[Algebra],
+                                             statetag: c.WeakTypeTag[State],
+                                             eventtag: c.WeakTypeTag[Event],
+                                             rejecttag: c.WeakTypeTag[Reject]
+                                           ): c.Tree = {
     import c.universe._
 
-    val algebra: c.universe.Type = tag.tpe.typeConstructor.dealias
+    val algebra: c.universe.Type = algebraTag.tpe.typeConstructor.dealias
     val state: c.universe.Type = statetag.tpe.typeConstructor.dealias
-    val event: c.universe.Type = tag.tpe.typeConstructor.dealias
-    val reject: c.universe.Type = tag.tpe.typeConstructor.dealias
+    val event: c.universe.Type = eventtag.tpe.typeConstructor.dealias
+    val reject: c.universe.Type = rejecttag.tpe.typeConstructor.dealias
     val methods: Iterable[Method] = overridableMethodsOf(algebra)
     val stubbedMethods: Iterable[Tree] = stubMethodsForClient(methods, state, event, reject)
-
     // function hint, bitvector to Task[bitvector]
     val serverHintBitVectorFunction: Tree = {
       methods.zipWithIndex.foldLeft[Tree](q"""throw new IllegalArgumentException(s"Unknown type tag $$hint")""") {
@@ -167,7 +159,6 @@ class DeriveMacros(val c: blackbox.Context) {
               //we should unpickle the result as well
 
               q"""
-               val index = $index
                val codecInput = codec[$TupleNCons[..$paramTypes]]
                val codecResult = codec[$out]
                """
@@ -181,11 +172,16 @@ class DeriveMacros(val c: blackbox.Context) {
 
           val invocation =
             q"""
-              $argsTerm
-              $runImplementation
+              ..$argsTerm
+              for {
+                  args  <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
+                  result <- $runImplementation
+                  vector <- Task.fromTry(codecResult.encode(result).toTry).mapError(errorHandler)
+              } yield vector
               """
 
-          q"""if (hint == index)  { $invocation } else $acc"""
+          q"""
+             if (hint == $index)  { $invocation } else $acc"""
       }
     }
 
@@ -199,30 +195,26 @@ class DeriveMacros(val c: blackbox.Context) {
 
              private val mainCodec = codec[(Int, BitVector)]
              val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
-               (commFn: BitVector => Task[BitVector], errorHandler: Throwable => String) =>
+               (commFn: BitVector => Task[BitVector], errorHandler: Throwable => $reject) =>
                  new $algebra { ..$stubbedMethods }
 
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =
                (algebra: $algebra, errorHandler: Throwable => $reject) =>
                  new Invocation[$state, $event, $reject] {
-                    private def buildVectorFromHint(hint: Int, arguments: BitVector): Task[BitVector] = { $serverHintBitVectorFunction }
+                   private def buildVectorFromHint(hint: Int, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = { $serverHintBitVectorFunction }
 
                    override def call(message: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = {
                      // for each method extract the name, it could be a sequence number for the method
-                     ZIO.accessM { algebraOps =>
                        // according to the hint, extract the arguments
                        for {
                          element <- Task.fromTry(mainCodec.decodeValue(message).toTry).mapError(errorHandler)
-                         (hint, arguments) = element
+                         hint = element._1
+                         arguments = element._2
                          //use extractedHint to decide what to do here
-                         vector <- buildVectorFromHint(hint, arguments).mapError(errorHandler)
+                         vector <- buildVectorFromHint(hint, arguments)
                        } yield vector
                      }
-                   }
                }
            }"""
   }
-
-  //    instantiate(symbolOf[WireProtocol[Any]], Alg)(encoder(Alg), decoder(Alg))
-
 }
