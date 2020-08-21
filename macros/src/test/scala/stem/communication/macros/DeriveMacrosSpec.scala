@@ -1,6 +1,7 @@
 package stem.communication.macros
 
 import org.scalatest.freespec.AnyFreeSpec
+import stem.data.StemProtocol
 import zio.Task
 
 import scala.reflect.ClassTag
@@ -8,23 +9,10 @@ import scala.reflect.ClassTag
 class DeriveMacrosSpec extends AnyFreeSpec {
 
   "Client macro" - {
-    "called directly" in {
-      RpcMacro.client[AlgebraImpl, String](vector => Task.succeed(vector), AlgebraImpl.errorHandler)
-    }
-
-    "called with generic type" in {
-//      callMacro[AlgebraImpl]
-    }
-
     "called proto macro" in {
-      import scala.reflect.runtime.universe.showRaw
-
-//      val macr = RpcMacro.derive
+//      import scala.reflect.runtime.universe.showRaw
+      val protocol: StemProtocol[AlgebraImpl, String, String, String] = RpcMacro.derive[AlgebraImpl, String, String, String]
     }
-  }
-
-  private def callMacro[Algebra] = {
-    RpcMacro.client[Algebra, String](vector => Task.succeed(vector), AlgebraImpl.errorHandler)
   }
 
 }

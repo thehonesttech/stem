@@ -1,11 +1,11 @@
 package stem.communication.macros
 
 import boopickle.Default._
+import stem.communication.macros.BoopickleCodec.{codec, _}
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.LockResponse
 import ledger.eventsourcing.events.events.LedgerEvent
 import scodec.bits.BitVector
-import stem.communication.macros.BoopickleCodec.{codec, _}
 import stem.data.{AlgebraCombinators, Invocation, StemProtocol}
 import zio.{Has, Task, ZIO}
 
@@ -44,6 +44,8 @@ object LedgerRpcMacro {
             override def release(transactionId: String, idempotencyKey: String): SIO[Unit] = { ??? }
 
             override def clear(transactionId: String, idempotencyKey: String): SIO[Unit] = { ??? }
+
+
         }
 
       val server: (LedgerCommandHandler, Throwable => String) => Invocation[Int, LedgerEvent, String] =

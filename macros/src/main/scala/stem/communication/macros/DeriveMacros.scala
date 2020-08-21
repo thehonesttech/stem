@@ -1,34 +1,25 @@
 package stem.communication.macros
 
-import scodec.bits.BitVector
-import stem.communication.macros.BoopickleCodec.codec
-import zio.Task
-
-import scala.reflect.ClassTag
 import scala.reflect.macros.blackbox
 
-class DeriveMacros(c: blackbox.Context) {
+class DeriveMacros(val c: blackbox.Context) {
 
   import c.internal._
   import c.universe._
 
   /** A reified method definition with some useful methods for transforming it. */
-  case class Method(m: MethodSymbol,
-                    tps: List[TypeDef],
-                    pss: List[List[ValDef]],
-                    rt: Type,
-                    body: Tree) {
-    def typeArgs: List[Type] = for (tp <- tps) yield typeRef(NoPrefix, tp.symbol, Nil)
+  case class Method(m: MethodSymbol, typeParams: List[TypeDef], paramList: List[List[ValDef]], returnType: Type, body: Tree) {
+    def typeArgs: List[Type] = for (tp <- typeParams) yield typeRef(NoPrefix, tp.symbol, Nil)
 
     def paramLists(f: Type => Type): List[List[ValDef]] =
-      for (ps <- pss)
+      for (ps <- paramList)
         yield for (p <- ps) yield ValDef(p.mods, p.name, TypeTree(f(p.tpt.tpe)), p.rhs)
 
     def argLists(f: (TermName, Type) => Tree): List[List[Tree]] =
-      for (ps <- pss)
+      for (ps <- paramList)
         yield for (p <- ps) yield f(p.name, p.tpt.tpe)
 
-    def definition: Tree = q"override def ${m.name}[..$tps](...$pss): $rt = $body"
+    def definition: Tree = q"override def ${m.name}[..$typeParams](...$paramList): $returnType = $body"
 
   }
 
@@ -40,7 +31,7 @@ class DeriveMacros(c: blackbox.Context) {
       m =>
         m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
           m.owner
-        )
+      )
     )
   }
 
@@ -67,40 +58,89 @@ class DeriveMacros(c: blackbox.Context) {
         )
       }
 
-  def stubMethods(methods: Iterable[Method]): Iterable[c.universe.Tree] = {
-   methods.zipWithIndex.map{
-     case (method, index)  =>
-       val newBody = q""" ZIO.accessM { _: Has[AlgebraCombinators[Int, LedgerEvent, String]] =>
-                                       val hint = 1
+  /** Delegate the definition of type members and aliases in `algebra`. */
+  private def delegateTypes(algebra: Type, members: Iterable[Symbol])(
+    rhs: (TypeSymbol, List[Type]) => Type
+  ): Iterable[Tree] =
+    for (member <- members if member.isType) yield {
+      val tpe = member.asType
+      val signature = tpe.typeSignatureIn(algebra)
+      val typeParams = for (t <- signature.typeParams) yield typeDef(t)
+      val typeArgs = for (t   <- signature.typeParams) yield typeRef(NoPrefix, t, Nil)
+      q"type ${tpe.name}[..$typeParams] = ${rhs(tpe, typeArgs)}"
+    }
 
-                                       val tuple: (BigDecimal, String) = (amount, idempotencyKey)
+  /** Implement a possibly refined `algebra` with the provided `members`. */
+  private def implement(algebra: Type, members: Iterable[Tree]): Tree = {
+    // If `members.isEmpty` we need an extra statement to ensure the generation of an anonymous class.
+    val nonEmptyMembers = if (members.isEmpty) q"()" :: Nil else members
 
-                                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
-                                       // LockReply.validate()
+    algebra match {
+      case RefinedType(parents, scope) =>
+        val refinements = delegateTypes(algebra, scope.filterNot(_.isAbstract)) { (tpe, _) =>
+          tpe.typeSignatureIn(algebra).resultType
+        }
 
-                                       val codecInput = codec[(BigDecimal, String)]
-                                       val codecResult = codec[LockResponse]
+        q"new ..$parents { ..$refinements; ..$nonEmptyMembers }"
+      case _ =>
+        q"new $algebra { ..$nonEmptyMembers }"
+    }
+  }
 
-                                       (for {
-                                         tupleEncoded <- Task.fromTry(codecInput.encode(tuple).toTry)
-                                         // start common code
-                                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry)
-                                         vector    <- commFn(arguments)
-                                         // end of common code
-                                         decoded <- Task.fromTry(codecResult.decodeValue(vector).toTry)
-                                       } yield decoded).mapError(errorHandler)
-                                     }"""
+  def stubMethodsForClient(
+    methods: Iterable[Method],
+    state: c.universe.Type,
+    event: c.universe.Type,
+    reject: c.universe.Type
+  ): Iterable[c.universe.Tree] = {
+    methods.zipWithIndex.map {
+      case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _), index) =>
+        val out = outParams.last
+        val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
+        println(s"Processing ${method.m.toString} with argList ${argList}")
 
-   }
-   ???
+        val argsTerm = {
+          if (argList.isEmpty) q""
+          else {
+            val paramTypes = paramList.flatten.map(_.tpt)
+            val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+            // return tuple with try in the state of unpickle generic
+            //we should unpickle the result as well
+            println(s"In Codec Tuple ${TupleNCons}")
+
+            val args = method.argLists((pn, _) => Ident(pn)).flatten
+            q"""
+               val codecInput = codec[$TupleNCons[..$paramTypes]]
+               val codecResult = codec[$out]
+               val tuple = (..$args)
+               """
+          }
+        }
+        val newBody = q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
+                       val hint = $index
+
+                       $argsTerm
+                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
+
+                       (for {
+                         tupleEncoded <- Task.fromTry(codecInput.encode(tuple).toTry)
+                         // start common code
+                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry)
+                         vector    <- commFn(arguments)
+                         // end of common code
+                         decoded <- Task.fromTry(codecResult.decodeValue(vector).toTry)
+                       } yield decoded).mapError(errorHandler)
+                     }"""
+        method.copy(body = newBody).definition
+    }
   }
 
   def derive[Algebra, State, Event, Reject](
-                                             implicit tag: c.WeakTypeTag[Algebra],
-                                             statetag: c.WeakTypeTag[State],
-                                             eventtag: c.WeakTypeTag[Event],
-                                             rejecttag: c.WeakTypeTag[Reject]
-                                           ): c.Tree = {
+    implicit tag: c.WeakTypeTag[Algebra],
+    statetag: c.WeakTypeTag[State],
+    eventtag: c.WeakTypeTag[Event],
+    rejecttag: c.WeakTypeTag[Reject]
+  ): c.Tree = {
     import c.universe._
 
     val algebra: c.universe.Type = tag.tpe.typeConstructor.dealias
@@ -108,34 +148,59 @@ class DeriveMacros(c: blackbox.Context) {
     val event: c.universe.Type = tag.tpe.typeConstructor.dealias
     val reject: c.universe.Type = tag.tpe.typeConstructor.dealias
     val methods: Iterable[Method] = overridableMethodsOf(algebra)
-val stubbedMethods: Iterable[Tree] = stubMethods(methods)
-
+    val stubbedMethods: Iterable[Tree] = stubMethodsForClient(methods, state, event, reject)
 
     // function hint, bitvector to Task[bitvector]
     val serverHintBitVectorFunction: Tree = {
-      val hint = ???
-      val arguments: BitVector = ???
+      methods.zipWithIndex.foldLeft[Tree](q"""throw new IllegalArgumentException(s"Unknown type tag $$hint")""") {
+        case (acc, (method, index)) =>
+          val Method(name, _, paramList, TypeRef(_, _, outParams), _) = method
 
+          val out = outParams.last
+          val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
+          val argsTerm =
+            if (argList.isEmpty) q""
+            else {
+              val paramTypes = paramList.flatten.map(_.tpt)
+              val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+              // return tuple with try in the state of unpickle generic
+              //we should unpickle the result as well
 
+              q"""
+               val index = $index
+               val codecInput = codec[$TupleNCons[..$paramTypes]]
+               val codecResult = codec[$out]
+               """
+            }
 
+          def runImplementation =
+            if (argList.isEmpty)
+              q"algebra.$name"
+            else
+              q"algebra.$name(...$argList)"
 
-      val codecInput = codec[(BigDecimal, String)]
-      val codecResult = codec[LockResponse]
-      input
-      <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
-      result
-      <- (algebra.lock _).tupled(input)
-      vector
-      <- Task.fromTry(codecResult.encode(result).toTry)
+          val invocation =
+            q"""
+              $argsTerm
+              $runImplementation
+              """
 
-      ???
+          q"""if (hint == index)  { $invocation } else $acc"""
+      }
     }
 
     q""" new StemProtocol[$algebra, $state, $event, $reject] {
+            import scodec.bits.BitVector
+            import boopickle.Default._
+            import stem.communication.macros.BoopickleCodec._
+            import stem.data.Invocation
+            import zio._
+            import stem.data.AlgebraCombinators
+
              private val mainCodec = codec[(Int, BitVector)]
              val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
                (commFn: BitVector => Task[BitVector], errorHandler: Throwable => String) =>
-                 new $algebra { ..$methodBody }
+                 new $algebra { ..$stubbedMethods }
 
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =
                (algebra: $algebra, errorHandler: Throwable => $reject) =>
@@ -156,20 +221,6 @@ val stubbedMethods: Iterable[Tree] = stubMethods(methods)
                    }
                }
            }"""
-  }
-
-  def client[Algebra, Reject](
-                               c: blackbox.Context
-                             )(fn: c.Expr[(BitVector) => Task[BitVector]], errorHandler: c.Expr[Throwable => Reject])(
-                               implicit tag: c.WeakTypeTag[Algebra]
-                             ): c.Tree = {
-    import c.universe._
-    def implement(algebra: Type, members: Iterable[Tree]): Tree = {
-      q"new $algebra {..$members }"
-    }
-
-    val Alg: c.universe.Type = tag.tpe.typeConstructor.dealias
-    implement(Alg, List.empty)
   }
 
   //    instantiate(symbolOf[WireProtocol[Any]], Alg)(encoder(Alg), decoder(Alg))
