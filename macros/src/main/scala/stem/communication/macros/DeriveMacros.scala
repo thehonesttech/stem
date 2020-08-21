@@ -36,7 +36,7 @@ class DeriveMacros(val c: blackbox.Context) {
   }
 
   private def overridableMethodsOf(algebra: Type): Iterable[Method] =
-    for (member <- overridableMembersOf(algebra) if member.isMethod && !member.asMethod.isAccessor)
+    for (member <- overridableMembersOf(algebra) if member.isMethod && member.asMethod.isPublic && !member.asMethod.isAccessor)
       yield {
         val method = member.asMethod
         val signature = method.typeSignatureIn(algebra)
@@ -95,6 +95,7 @@ class DeriveMacros(val c: blackbox.Context) {
                           ): Iterable[c.universe.Tree] = {
     methods.zipWithIndex.map {
       case (method@Method(_, _, paramList, TypeRef(_, _, outParams), _), index) =>
+//        println(s"OutParams $outParams on method $method")
         val out = outParams.last
         val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
 

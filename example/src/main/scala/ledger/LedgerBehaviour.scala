@@ -11,7 +11,7 @@ import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleas
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
 import stem.annotations.MethodId
-import stem.communication.macros.LedgerRpcMacro
+import stem.communication.macros.RpcMacro
 import stem.data.AlgebraCombinators.Combinators
 import stem.data.{AlgebraCombinators, StemProtocol}
 import stem.runtime.akka.StemRuntime.memoryStemtity
@@ -91,7 +91,7 @@ object LedgerEntity {
   )
 
   implicit val ledgerProtocol
-    : StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] = LedgerRpcMacro.ledgerProtocol  // we need to invoke the macro, for now, we can put the manual macro instead
+    : StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] = RpcMacro.derive[LedgerCommandHandler, Int, LedgerEvent, String] //  LedgerRpcMacro.ledgerProtocol
   // TODO: setup kafka
   val live = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
