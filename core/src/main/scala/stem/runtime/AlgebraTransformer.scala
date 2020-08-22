@@ -23,4 +23,12 @@ object AlgebraTransformer {
     algebra: AlgebraCombinators[State, Event, Reject]
   ): S[ZEnv, Any] = implicitly[TransformableService[S]].transform(service, transform[State, Event, Reject](algebra))
 
+  object Ops {
+    implicit class RichAlgebraService[State: Tag, Event: Tag, Reject: Tag, S[_, _]: scalapb.zio_grpc.TransformableService](service: S[ZEnv with Combinators[State, Event, Reject], Any]) {
+      def withAlgebra(algebra:  AlgebraCombinators[State, Event, Reject]): S[ZEnv, Any] = {
+        AlgebraTransformer.withAlgebra(service, algebra)
+      }
+    }
+  }
+
 }
