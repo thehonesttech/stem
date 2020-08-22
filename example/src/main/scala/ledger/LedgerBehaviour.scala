@@ -26,15 +26,8 @@ case class Denied(reason: String) extends LockResponse
 
 object LedgerServer extends ServerMain {
 
-  private val actorSystem =
-    ZLayer.fromManaged(
-      Managed.make(Task(ActorSystem("System", ConfigFactory.load("stem.conf"))))(sys => Task.fromFuture(_ => sys.terminate()).either)
-    )
-
-  private val runtimeSettings = actorSystem to ZLayer.fromService { actorSystem: ActorSystem =>
-      RuntimeSettings.default(actorSystem)
-    }
-
+  private val actorSystem = StemApp.actorSystemLayer("System")
+  private val runtimeSettings = actorSystem to ZLayer.fromService (RuntimeSettings.default)
   private val liveAlgebra = StemApp.liveAlgebraLayer[Int, LedgerEvent, String]
 
   // dependency injection wiring
@@ -51,7 +44,7 @@ object LedgerEntity {
   implicit val keyDecoder: KeyDecoder[String] = (key: String) => Some(key)
 
   class LedgerCommandHandler {
-    type SIO[Response] = ZIO[Combinators[Int, LedgerEvent, String], String, Response]
+    type SIO[Response] = StemApp.SIO[Int, LedgerEvent, String, Response]
 
     @MethodId(1)
     def lock(amount: BigDecimal, idempotencyKey: String): SIO[LockResponse] = ZIO.accessM { opsL =>
