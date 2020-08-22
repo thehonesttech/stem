@@ -1,6 +1,7 @@
 package stem.communication.macros
 
 import scala.reflect.macros.blackbox
+import stem.communication.macros.annotations.MethodId
 
 class DeriveMacros(val c: blackbox.Context) {
 
@@ -8,7 +9,7 @@ class DeriveMacros(val c: blackbox.Context) {
   import c.universe._
 
   /** A reified method definition with some useful methods for transforming it. */
-  case class Method(m: MethodSymbol, typeParams: List[TypeDef], paramList: List[List[ValDef]], returnType: Type, body: Tree) {
+  case class Method(m: MethodSymbol, typeParams: List[TypeDef], paramList: List[List[ValDef]], returnType: Type, body: Tree, hint: Option[Int] = None) {
     def typeArgs: List[Type] = for (tp <- typeParams) yield typeRef(NoPrefix, tp.symbol, Nil)
 
     def paramLists(f: Type => Type): List[List[ValDef]] =
@@ -39,6 +40,11 @@ class DeriveMacros(val c: blackbox.Context) {
     for (member <- overridableMembersOf(algebra) if member.isMethod && member.asMethod.isPublic && !member.asMethod.isAccessor)
       yield {
         val method = member.asMethod
+        val methodIdValue = member.annotations.collectFirst{
+          case a if a.tree.tpe.dealias <:< typeOf[MethodId].dealias =>
+            val Literal(Constant(value: Int)) = a.tree.children.tail.head
+            value
+        }
         val signature = method.typeSignatureIn(algebra)
         val typeParams = for (tp <- signature.typeParams) yield typeDef(tp)
         val paramLists = for (ps <- signature.paramLists)
@@ -54,38 +60,11 @@ class DeriveMacros(val c: blackbox.Context) {
           typeParams,
           paramLists,
           signature.finalResultType,
-          q"_root_.scala.Predef.???"
+          q"_root_.scala.Predef.???",
+          hint = methodIdValue
         )
       }
 
-  /** Delegate the definition of type members and aliases in `algebra`. */
-  private def delegateTypes(algebra: Type, members: Iterable[Symbol])(
-    rhs: (TypeSymbol, List[Type]) => Type
-  ): Iterable[Tree] =
-    for (member <- members if member.isType) yield {
-      val tpe = member.asType
-      val signature = tpe.typeSignatureIn(algebra)
-      val typeParams = for (t <- signature.typeParams) yield typeDef(t)
-      val typeArgs = for (t <- signature.typeParams) yield typeRef(NoPrefix, t, Nil)
-      q"type ${tpe.name}[..$typeParams] = ${rhs(tpe, typeArgs)}"
-    }
-
-  /** Implement a possibly refined `algebra` with the provided `members`. */
-  private def implement(algebra: Type, members: Iterable[Tree]): Tree = {
-    // If `members.isEmpty` we need an extra statement to ensure the generation of an anonymous class.
-    val nonEmptyMembers = if (members.isEmpty) q"()" :: Nil else members
-
-    algebra match {
-      case RefinedType(parents, scope) =>
-        val refinements = delegateTypes(algebra, scope.filterNot(_.isAbstract)) { (tpe, _) =>
-          tpe.typeSignatureIn(algebra).resultType
-        }
-
-        q"new ..$parents { ..$refinements; ..$nonEmptyMembers }"
-      case _ =>
-        q"new $algebra { ..$nonEmptyMembers }"
-    }
-  }
 
   def stubMethodsForClient(
                             methods: Iterable[Method],
@@ -94,21 +73,20 @@ class DeriveMacros(val c: blackbox.Context) {
                             reject: c.universe.Type
                           ): Iterable[c.universe.Tree] = {
     methods.zipWithIndex.map {
-      case (method@Method(_, _, paramList, TypeRef(_, _, outParams), _), index) =>
+      case (method@Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
 //        println(s"OutParams $outParams on method $method")
         val out = outParams.last
-        val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
-
         val paramTypes = paramList.flatten.map(_.tpt)
         val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
         val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
         val args = method.argLists((pn, _) => Ident(pn)).flatten
 
+        val hintToUse: String = hint.getOrElse(index).toString
 
         // TODO: missing empty args
         val newBody =
           q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
-                       val hint = $index
+                       val hint = $hintToUse
 
                        val codecInput = codec[$TupleNCons[..$paramTypes]]
                        val codecResult = codec[$out]
@@ -147,7 +125,9 @@ class DeriveMacros(val c: blackbox.Context) {
     val serverHintBitVectorFunction: Tree = {
       methods.zipWithIndex.foldLeft[Tree](q"""throw new IllegalArgumentException(s"Unknown type tag $$hint")""") {
         case (acc, (method, index)) =>
-          val Method(name, _, paramList, TypeRef(_, _, outParams), _) = method
+          val Method(name, _, paramList, TypeRef(_, _, outParams), _, hint) = method
+
+          val hintToUse = hint.getOrElse(index).toString
 
           val out = outParams.last
           val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
@@ -182,7 +162,7 @@ class DeriveMacros(val c: blackbox.Context) {
               """
 
           q"""
-             if (hint == $index)  { $invocation } else $acc"""
+             if (hint == $hintToUse)  { $invocation } else $acc"""
       }
     }
 
@@ -194,7 +174,7 @@ class DeriveMacros(val c: blackbox.Context) {
             import zio._
             import stem.data.AlgebraCombinators
 
-             private val mainCodec = codec[(Int, BitVector)]
+             private val mainCodec = codec[(String, BitVector)]
              val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
                (commFn: BitVector => Task[BitVector], errorHandler: Throwable => $reject) =>
                  new $algebra { ..$stubbedMethods }
@@ -202,7 +182,7 @@ class DeriveMacros(val c: blackbox.Context) {
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =
                (algebra: $algebra, errorHandler: Throwable => $reject) =>
                  new Invocation[$state, $event, $reject] {
-                   private def buildVectorFromHint(hint: Int, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = { $serverHintBitVectorFunction }
+                   private def buildVectorFromHint(hint: String, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = { $serverHintBitVectorFunction }
 
                    override def call(message: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = {
                      // for each method extract the name, it could be a sequence number for the method

@@ -10,8 +10,8 @@ import ledger.eventsourcing.events.events
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleased}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
-import stem.annotations.MethodId
 import stem.communication.macros.RpcMacro
+import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
 import stem.data.{AlgebraCombinators, StemProtocol}
 import stem.runtime.akka.StemRuntime.memoryStemtity

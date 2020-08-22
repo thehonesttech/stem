@@ -1,4 +1,4 @@
-package stem.annotations
+package stem.communication.macros.annotations
 
 /**
   * Used to annotate method with a unique id (every method must have a different id) in order to allow evolution.
