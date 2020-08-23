@@ -1,7 +1,6 @@
 package ledger
 
 import akka.actor.ActorSystem
-import com.google.protobuf.{CodedInputStream, Descriptors}
 import io.grpc.Status
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.LedgerService.Ledgers
@@ -9,19 +8,15 @@ import ledger.MessageHandler.ConsumerConfiguration
 import ledger.communication.grpc.service.ZioService.ZLedger
 import ledger.communication.grpc.service._
 import ledger.eventsourcing.events.events
-import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LedgerEventMessage, LockReleased}
+import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleased}
 import ledger.messages.messages.{Authorization, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage}
-import org.apache.kafka.clients.KafkaClient
-import scalapb.descriptors.{Descriptor, Reads}
-import scalapb.{GeneratedEnumCompanion, GeneratedMessage, GeneratedMessageCompanion}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
-import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaConsumerConfiguration, KafkaGrpcConsumerConfiguration}
+import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaGrpcConsumerConfiguration}
 import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
 import stem.data.{AlgebraCombinators, StemProtocol}
-import stem.idempotency.IdempotencyKey
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
 import stem.runtime.{AlgebraTransformer, Fold}
@@ -123,8 +118,8 @@ object LedgerEntity {
 
 object MessageHandler {
 
-  import ledger.LedgerService.Conversions._
   import LedgerServer.LedgerCombinator
+  import ledger.LedgerService.Conversions._
   type ConsumerConfiguration = KafkaConsumerConfig[LedgerId, LedgerInstructionsMessage]
 
   val messageHandling: ZIO[Has[Ledgers] with Has[LedgerCombinator], Throwable, (LedgerId, LedgerInstructionsMessage) => Task[Unit]] =
