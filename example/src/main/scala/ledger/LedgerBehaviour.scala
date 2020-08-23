@@ -17,9 +17,11 @@ import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
 import stem.data.{AlgebraCombinators, StemProtocol}
+import stem.journal.EventJournal
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
-import stem.runtime.{AlgebraTransformer, Fold}
+import stem.runtime.readside.JournalQuery
+import stem.runtime.{AlgebraTransformer, EventJournalStore, Fold}
 import stem.tagging.{EventTag, Tagging}
 import zio.blocking.Blocking
 import zio.clock.Clock
@@ -39,7 +41,12 @@ object LedgerServer extends ServerMain {
   private val liveAlgebra = StemApp.liveAlgebraLayer[Int, LedgerEvent, String]
 
   // dependency injection wiring
-  private val entity = (actorSystem and runtimeSettings to LedgerEntity.live)
+  val memoryStore = EventJournalStore.memory[String, LedgerEvent]
+
+  private val eventJournalStore = ZLayer.fromEffect(memoryStore.map[EventJournal[String, LedgerEvent ]](identity))
+  private val journalQueryStore = ZLayer.fromEffect(memoryStore.map[JournalQuery[Long, String, LedgerEvent ]](identity))
+
+  private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
 
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
@@ -49,10 +56,10 @@ object LedgerServer extends ServerMain {
       )
     )
 
-  private val readSideProcessing: ZLayer[Any, Throwable, Has[Unit]] = ???
-  private val kafkaRead = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
+  private val readSideProcessing: ZLayer[Any, Throwable, Has[Unit]] = journalQueryStore to ReadSideProcessor.live
+  private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    (entity and liveAlgebra to LedgerService.live) and kafkaRead and readSideProcessing
+    (entity and liveAlgebra to LedgerService.live) and kafkaMessageHandling and readSideProcessing
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
@@ -107,13 +114,19 @@ object LedgerEntity {
     RpcMacro.derive[LedgerCommandHandler, Int, LedgerEvent, String]
 
   // TODO: setup kafka
-  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings], Throwable, Has[String => LedgerCommandHandler]] = ZLayer.fromEffect {
+  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[String => LedgerCommandHandler]] = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
       "Ledger",
       Tagging.const(EventTag("Ledger")),
       EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
     )
   }
+}
+
+object ReadSideProcessor {
+  def live: ZLayer[Has[JournalQuery[Long, String, LedgerEvent]], Throwable, Has[Unit]] = ???
+
+
 }
 
 object MessageHandler {

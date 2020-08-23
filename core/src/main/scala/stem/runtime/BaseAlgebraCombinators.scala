@@ -3,12 +3,14 @@ package stem.runtime
 import izumi.reflect.Tag
 import stem.data.Versioned
 import stem.journal.{EventJournal, MemoryEventJournal}
+import stem.runtime.readside.JournalQuery
 import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import stem.tagging.Tagging
 import zio.{Ref, _}
 
 /**
   * Algebra that depends on key (you can override this)
+  *
   * @tparam Key
   * @tparam State
   * @tparam Event
@@ -18,14 +20,17 @@ trait BaseAlgebraCombinators[Key, State, Event, Reject] {
   type KeyAndFold = Has[Key] with Has[Fold[State, Event]]
 
   def read: RIO[KeyAndFold, State]
+
   def append(es: Event, other: Event*): RIO[KeyAndFold, Unit]
+
   def ignore: Task[Unit] = Task.unit
+
   def reject(r: Reject): IO[Reject, Nothing]
 }
 
 class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   // TODO use a better type for the tag
-//  tag: String,
+  //  tag: String,
   state: Ref[Option[State]],
   eventJournalOffsetStore: KeyValueStore[Key, Long],
   tagging: Tagging[Key],
@@ -108,19 +113,34 @@ class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
 
 }
 
-object LiveBaseAlgebraCombinators {
-  def memory[Key: Tag, State: Tag, Event: Tag, Reject](
-    tagging: Tagging[Key]
-  ): ZIO[Any, Nothing, LiveBaseAlgebraCombinators[Key, State, Event, Reject]] = {
+object EventJournalStore {
+
+  def memory[Key: Tag, Event: Tag]: ZIO[Any, Nothing, EventJournal[Key, Event] with JournalQuery[Long, Key, Event]] = {
     import scala.concurrent.duration._
     for {
-      state                <- Ref.make[Option[State]](None)
       eventJournalInternal <- Ref.make[Map[Key, Chunk[(Long, Event, List[String])]]](Map.empty)
-      memoryEventJournal = new MemoryEventJournal[Key, Event](100.millis, eventJournalInternal)
-      internalKeyValueStore <- Ref.make[Map[Key, Long]](Map.empty)
-      memoryEventJournalOffsetStore = new MemoryKeyValueStore[Key, Long](internalKeyValueStore)
-      internalSnapshotKeyValueStore <- Ref.make[Map[Key, Versioned[State]]](Map.empty)
-      snapshotKeyValueStore = new MemoryKeyValueStore[Key, Versioned[State]](internalSnapshotKeyValueStore)
+    } yield new MemoryEventJournal[Key, Event](100.millis, eventJournalInternal)
+  }
+
+}
+
+object KeyValueStore {
+  def memory[Key: Tag, Value: Tag]: ZIO[Any, Nothing, KeyValueStore[Key, Value]] = {
+    for {
+      internalKeyValueStore <- Ref.make[Map[Key, Value]](Map.empty)
+    } yield new MemoryKeyValueStore[Key, Value](internalKeyValueStore)
+  }
+}
+
+object LiveBaseAlgebraCombinators {
+  def memory[Key: Tag, State: Tag, Event: Tag, Reject](
+    memoryEventJournal: EventJournal[Key, Event],
+    memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
+    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
+    tagging: Tagging[Key]
+  ): ZIO[Any, Nothing, LiveBaseAlgebraCombinators[Key, State, Event, Reject]] = {
+    for {
+      state <- Ref.make[Option[State]](None)
       snapshotting = Snapshotting.eachVersion(10, snapshotKeyValueStore)
     } yield new LiveBaseAlgebraCombinators(state, memoryEventJournalOffsetStore, tagging, memoryEventJournal, snapshotting)
   }
@@ -141,6 +161,7 @@ final case class Fold[State, Event](initial: State, reduce: (State, Event) => Ta
   def expand[B](init: State => B, read: B => State, update: (B, State) => B): Fold[B, Event] =
     Fold(init(initial), (current, e) => reduce(read(current), e).map(update(current, _)))
 }
+
 object Fold {
 
   def count[A]: Fold[Long, A] =

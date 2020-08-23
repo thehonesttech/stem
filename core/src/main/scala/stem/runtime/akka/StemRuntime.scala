@@ -8,8 +8,9 @@ import akka.pattern.ask
 import akka.util.Timeout
 import izumi.reflect.Tag
 import scodec.bits.BitVector
-import stem.data.StemProtocol
-import stem.runtime.BaseAlgebraCombinators
+import stem.data.{StemProtocol, Versioned}
+import stem.journal.EventJournal
+import stem.runtime.{BaseAlgebraCombinators, EventJournalStore, KeyValueStore}
 import stem.runtime.LiveBaseAlgebraCombinators.memory
 import stem.runtime.akka.serialization.Message
 import stem.tagging.Tagging
@@ -28,11 +29,16 @@ object StemRuntime {
   )(
     implicit runtime: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
-  ): ZIO[Has[ActorSystem] with Has[RuntimeSettings], Throwable, Key => Algebra] = {
-    for {
-      combinators <- memory[Key, State, Event, Reject](tagging)
-      ledger      <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
-    } yield ledger
+  ): ZIO[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[Key, Event]], Throwable, Key => Algebra] = {
+    ZIO.accessM { layer =>
+      val memoryEventJournal = layer.get[EventJournal[Key, Event]]
+      for {
+        memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
+        snapshotKeyValueStore <- KeyValueStore.memory[Key, Versioned[State]]
+        combinators <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
+        ledger <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
+      } yield ledger
+    }
   }
 
   def buildStemtity[Key: KeyDecoder: KeyEncoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
@@ -72,29 +78,29 @@ object StemRuntime {
 
     // macro that creates bytes when method is invoked
 
-    key: Key => {
+    key: Key =>
+      {
 
-      implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
-      // implementation of algebra that transform the method in bytes inject the function in it
-      protocol.client(
-//      RpcMacro.client[Algebra, Reject](
-        { bytes =>
-          Task
-            .fromFuture { _ =>
-              shardRegion ? KeyedCommand(keyEncoder(key), bytes)
-            }
-            .flatMap {
-              case result: CommandResult =>
-                Task.succeed(result.bytes)
-              case other =>
-                Task.fail(
-                  new IllegalArgumentException(s"Unexpected response [$other] from shard region")
-                )
-            }
-        },
-        eventSourcedBehaviour.errorHandler
-      )
-    }
+        implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
+        // implementation of algebra that transform the method in bytes inject the function in it
+        protocol.client(
+          { bytes =>
+            Task
+              .fromFuture { _ =>
+                shardRegion ? KeyedCommand(keyEncoder(key), bytes)
+              }
+              .flatMap {
+                case result: CommandResult =>
+                  Task.succeed(result.bytes)
+                case other =>
+                  Task.fail(
+                    new IllegalArgumentException(s"Unexpected response [$other] from shard region")
+                  )
+              }
+          },
+          eventSourcedBehaviour.errorHandler
+        )
+      }
   }
 
 }
