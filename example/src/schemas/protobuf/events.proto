@@ -22,3 +22,4 @@ message BigDecimal {
    uint64 scale = 1;
    int32 precision = 2;
 }
+

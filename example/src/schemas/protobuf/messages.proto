@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package ledger.messages;
+
+import "events.proto";
+
+message LedgerInstructionsMessage {
+
+    oneof sealed_value {
+        Authorization authorization = 1;
+    }
+}
+
+message Authorization {
+    string accountId = 1;
+    ledger.eventsourcing.events.BigDecimal amount = 2;
+    string idempotencyKey = 3;
+}
+
+message LedgerId {
+    string value = 1;
+}

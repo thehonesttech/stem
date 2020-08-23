@@ -1,6 +1,7 @@
 package ledger
 
 import akka.actor.ActorSystem
+import com.google.protobuf.{CodedInputStream, Descriptors}
 import io.grpc.Status
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.LedgerService.Ledgers
@@ -9,10 +10,13 @@ import ledger.communication.grpc.service.ZioService.ZLedger
 import ledger.communication.grpc.service._
 import ledger.eventsourcing.events.events
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LedgerEventMessage, LockReleased}
+import ledger.messages.messages.{Authorization, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage}
 import org.apache.kafka.clients.KafkaClient
+import scalapb.descriptors.{Descriptor, Reads}
+import scalapb.{GeneratedEnumCompanion, GeneratedMessage, GeneratedMessageCompanion}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
-import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfiguration}
+import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaConsumerConfiguration, KafkaGrpcConsumerConfiguration}
 import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
@@ -25,6 +29,7 @@ import stem.tagging.{EventTag, Tagging}
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
+import zio.kafka.consumer.ConsumerSettings
 import zio.{Has, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 sealed trait LockResponse
@@ -40,11 +45,19 @@ object LedgerServer extends ServerMain {
 
   // dependency injection wiring
   private val entity = (actorSystem and runtimeSettings to LedgerEntity.live)
+
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
-    ZLayer.succeed(KafkaConsumerConfiguration("testtopic", ???, ???, ???))
+    ZLayer.succeed(
+      KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
+        "testtopic",
+        ConsumerSettings(List("0.0.0.0"))
+      )
+    )
+
+  private val readSideProcessing: ZLayer[Any, Throwable, Has[Unit]] = ???
   private val kafkaRead = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    (entity and liveAlgebra to LedgerService.live) and kafkaRead
+    (entity and liveAlgebra to LedgerService.live) and kafkaRead and readSideProcessing
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
@@ -110,25 +123,31 @@ object LedgerEntity {
 
 object MessageHandler {
 
+  import ledger.LedgerService.Conversions._
   import LedgerServer.LedgerCombinator
-  type ConsumerConfiguration = KafkaConsumerConfiguration[String, LedgerInstructionsMessage]
+  type ConsumerConfiguration = KafkaConsumerConfig[LedgerId, LedgerInstructionsMessage]
 
-  val messageHandling: ZIO[Has[Ledgers] with Has[LedgerCombinator], Throwable, (String, LedgerInstructionsMessage) => Task[Unit]] =
+  val messageHandling: ZIO[Has[Ledgers] with Has[LedgerCombinator], Throwable, (LedgerId, LedgerInstructionsMessage) => Task[Unit]] =
     ZIO.access { layers =>
       val ledgers = layers.get
       val combinator: LedgerCombinator = layers.get[LedgerCombinator]
-      (key: String, instructionMessage: LedgerInstructionsMessage) =>
+      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) =>
         {
           instructionMessage match {
-            case Authorization(accountId, amount, idempotencyKey) =>
-              ledgers(accountId).lock(amount, idempotencyKey.value).as().mapError(error => new Exception(s"$error happened"))
+            case Authorization(accountId, amount, idempotencyKey, _) =>
+              ledgers(accountId)
+                .lock(fromLedgerBigDecimal(amount), idempotencyKey)
+                .as()
+                .mapError(error => new Exception(s"$error happened"))
             case _ => ZIO.unit
           }
         }.provideLayer(ZLayer.succeed(combinator))
     }
 
   val live
-    : ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[Unit]] = {
+    : ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[
+      Unit
+    ]] = {
     ZLayer.fromEffect {
       ZIO.accessM { layers: Has[ConsumerConfiguration] =>
         val kafkaConsumerConfiguration = layers.get[ConsumerConfiguration]
@@ -176,7 +195,3 @@ object LedgerService {
     }
 
 }
-
-sealed trait LedgerInstructionsMessage
-
-case class Authorization(accountId: String, amount: BigDecimal, idempotencyKey: IdempotencyKey) extends LedgerInstructionsMessage

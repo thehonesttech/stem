@@ -1,6 +1,8 @@
 package stem.communication.kafka
 
 import org.apache.kafka.clients.producer.{ProducerRecord, RecordMetadata}
+import org.apache.kafka.common.header.Headers
+import scalapb.{GeneratedMessage, GeneratedMessageCompanion, GeneratedSealedOneof, TypeMapper}
 import zio.Schedule.Decision
 import zio.{Tag, ZLayer, _}
 import zio.blocking.Blocking
@@ -12,7 +14,7 @@ import zio.kafka.producer.{Producer, ProducerSettings}
 import zio.kafka.serde._
 
 class KafkaConsumer[K: Tag, V: Tag](
-  consumerConfiguration: KafkaConsumerConfiguration[K, V]
+  consumerConfiguration: KafkaConsumerConfig[K, V]
 ) {
   type RecordProducer = Producer[Any, K, V]
   val consumerManaged: ZManaged[Clock with Blocking, Throwable, Consumer.Service] =
@@ -21,44 +23,91 @@ class KafkaConsumer[K: Tag, V: Tag](
   val consumer: ZLayer[Clock with Blocking, Throwable, Consumer] =
     ZLayer.fromManaged(consumerManaged)
 
-  private val scheduleEvery5Seconds = Schedule.spaced(5.seconds).onDecision({
-    case Decision.Done(_)                 => putStrLn(s"Reconnection successfull")
-    case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
-  })
+  private val scheduleEvery5Seconds = Schedule
+    .spaced(5.seconds)
+    .onDecision({
+      case Decision.Done(_)                 => putStrLn(s"Reconnection successfull")
+      case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
+    })
 
   def subscribe[Reject](fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, Unit] = {
 
     Consumer
       .subscribeAnd(Subscription.topics(consumerConfiguration.topic))
       .plainStream(consumerConfiguration.keySerde, consumerConfiguration.valueSerde)
+      .provideSomeLayer(consumer)
       .mapM { record =>
         val key = record.key
         val value = record.value
         fn(key, value)
       }
-      .provideSomeLayer(consumer)
-      .runDrain.retry(scheduleEvery5Seconds)
+      .runDrain
+      .retry(scheduleEvery5Seconds)
   }
 
 }
 
-case class KafkaConsumerConfiguration[K: Tag, V: Tag](topic: String, consumerSettings: ConsumerSettings,
-                                                      keySerde: Serde[Any, K],
-                                                      valueSerde: Serde[Any, V] )
+trait KafkaConsumerConfig[K, V] {
+  def topic: String
 
+  def consumerSettings: ConsumerSettings
 
-object KafkaConsumer {
-  def apply[K: Tag, V: Tag](consumerConfiguration: KafkaConsumerConfiguration[K, V]): KafkaConsumer[K, V] =
-    new KafkaConsumer(consumerConfiguration)
+  def keySerde: Serde[Any, K]
+
+  def valueSerde: Serde[Any, V]
+}
+
+case class KafkaConsumerConfiguration[K: Tag, V: Tag](
+  topic: String,
+  consumerSettings: ConsumerSettings,
+  keySerde: Serde[Any, K],
+  valueSerde: Serde[Any, V]
+) extends KafkaConsumerConfig[K, V]
+
+case class KafkaGrpcConsumerConfiguration[
+  K <: GeneratedMessage: GeneratedMessageCompanion: Tag,
+  V <: GeneratedSealedOneof : Tag,
+  L <: GeneratedMessage: GeneratedMessageCompanion
+](topic: String, consumerSettings: ConsumerSettings)(implicit val typeMapper: TypeMapper[L, V])
+    extends KafkaConsumerConfig[K, V] {
+  val keySerde: Serde[Any, K] = new GrpcSerde[K]
+  val valueSerde: Serde[Any, V] = new GrpcSealedSerde[V, L]
+}
+
+class GrpcSealedSerde[T <: GeneratedSealedOneof, L <: GeneratedMessage: GeneratedMessageCompanion](implicit val typeMapper: TypeMapper[L, T]) extends Serde[Any, T] {
+  def deserialize(topic: String, headers: Headers, data: Array[Byte]): RIO[Any, T] = {
+    RIO.succeed(implicitly[TypeMapper[ L, T]].toCustom(implicitly[GeneratedMessageCompanion[L]].parseFrom(data)))
+  }
+
+  def serialize(topic: String, headers: Headers, value: T): RIO[Any, Array[Byte]] = {
+    RIO.succeed(implicitly[GeneratedMessageCompanion[L]].toByteArray(implicitly[TypeMapper[ L, T]].toBase(value)))
+  }
+
+  def configure(props: Map[String, AnyRef], isKey: Boolean): Task[Unit] = Task.unit
 }
 
 
+class GrpcSerde[T <: GeneratedMessage: GeneratedMessageCompanion] extends Serde[Any, T] {
+  def deserialize(topic: String, headers: Headers, data: Array[Byte]): RIO[Any, T] =
+    RIO.succeed(implicitly[GeneratedMessageCompanion[T]].parseFrom(data))
+
+  def serialize(topic: String, headers: Headers, value: T): RIO[Any, Array[Byte]] =
+    RIO.succeed(implicitly[GeneratedMessageCompanion[T]].toByteArray(value))
+
+  def configure(props: Map[String, AnyRef], isKey: Boolean): Task[Unit] = Task.unit
+}
+
+object KafkaConsumer {
+  def apply[K: Tag, V: Tag](consumerConfiguration: KafkaConsumerConfig[K, V]): KafkaConsumer[K, V] =
+    new KafkaConsumer(consumerConfiguration)
+}
+
 class KafkaProducer[K: Tag, V: Tag](
-                                   topic: String,
-                                   producerSettings: ProducerSettings,
-                                   keySerde: Serde[Any, K],
-                                   valueSerde: Serde[Any, V]
-                                 ) {
+  topic: String,
+  producerSettings: ProducerSettings,
+  keySerde: Serde[Any, K],
+  valueSerde: Serde[Any, V]
+) {
   type RecordProducer = Producer[Any, K, V]
 
   val producerManaged: ZManaged[Any, Throwable, Producer.Service[Any, K, V]] =
@@ -71,7 +120,5 @@ class KafkaProducer[K: Tag, V: Tag](
   }
 
 }
-
-
 
 case class KafkaProducerConfiguration(topic: String, producerSettings: ProducerSettings)
