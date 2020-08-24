@@ -41,7 +41,7 @@ object LedgerServer extends ServerMain {
   private val liveAlgebra = StemApp.liveAlgebraLayer[Int, LedgerEvent, String]
 
   // dependency injection wiring
-  val memoryStore = EventJournalStore.memory[String, LedgerEvent]
+  private val memoryStore = EventJournalStore.memory[String, LedgerEvent]
 
   private val eventJournalStore = ZLayer.fromEffect(memoryStore.map[EventJournal[String, LedgerEvent ]](identity))
   private val journalQueryStore = ZLayer.fromEffect(memoryStore.map[JournalQuery[Long, String, LedgerEvent ]](identity))
@@ -124,10 +124,20 @@ object LedgerEntity {
 }
 
 object ReadSideProcessor {
-  def live: ZLayer[Has[JournalQuery[Long, String, LedgerEvent]], Throwable, Has[Unit]] = ???
+  def live: ZLayer[Has[JournalQuery[Long, String, LedgerEvent]], Throwable, Has[Unit]] = {
+
+???
+
+  }
+
+  private val readSideProcessorLogic = {
+    ???
+  }
 
 
 }
+
+
 
 object MessageHandler {
 

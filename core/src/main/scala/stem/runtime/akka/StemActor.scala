@@ -3,13 +3,14 @@ package stem.runtime.akka
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
-import akka.actor.{Actor, ActorLogging, Props, Stash}
+import akka.actor.{Actor, ActorLogging, Props, ReceiveTimeout, Stash, Status}
+import akka.cluster.sharding.ShardRegion
 import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.data.StemProtocol
 import stem.data.{AlgebraCombinators, Invocation}
 import stem.runtime.{BaseAlgebraCombinators, Fold}
-import zio.{Has, Runtime, Task, ZEnv, ZLayer}
+import zio.{Has, Runtime, Task, ZEnv, ZIO, ZLayer}
 
 object StemActor {
   def props[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
@@ -66,19 +67,30 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       val invocation: Invocation[State, Event, Reject] =
         protocol.server.apply(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
 
-      // decode error and call
-
-      //TODO move from SIO into a (algebraOperators) => IO ?
-
       sender() ! runtime
         .unsafeRunToFuture(
           invocation
             .call(bytes)
             .provideLayer(algebraCombinatorsWithKeyResolved)
-            .mapError(_ => new Exception("TODO: return the reject type"))
+            .mapError {
+              reject =>
+                val decodingError = new IllegalArgumentException(s"Reject error ${reject}")
+                log.error(decodingError, "Failed to decode invocation")
+                sender() ! Status.Failure(decodingError)
+                decodingError
+            }
         )
         .map(replyBytes => CommandResult(replyBytes))(context.dispatcher)
 
+    case ReceiveTimeout =>
+      passivate()
+    case Stop =>
+      context.stop(self)
+  }
+
+  private def passivate(): Unit = {
+    log.debug("Passivating...")
+    context.parent ! ShardRegion.Passivate(Stop)
   }
 
   private case object Start
@@ -89,6 +101,8 @@ sealed trait StemCommand
 case class CommandInvocation(bytes: BitVector) extends StemCommand
 
 case class CommandResult(bytes: BitVector)
+
+case object Stop
 
 trait KeyDecoder[A] {
   def apply(key: String): Option[A]
