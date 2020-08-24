@@ -53,7 +53,6 @@ object LedgerServer extends ServerMain {
       } yield (new CommittableJournalStore[Long, String, LedgerEvent ](readSideOffsetStore, journalQueryStore) :CommittableJournalQuery[Long, String, LedgerEvent])
   }
 
-  private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
 
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
@@ -63,11 +62,13 @@ object LedgerServer extends ServerMain {
       )
     )
 
+  private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
   private val readSideProcessing = (committableJournalQueryStore and entity) to ReadSideProcessor.live
+  private val ledgerService = entity and liveAlgebra to LedgerService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    (entity and liveAlgebra to LedgerService.live) and kafkaMessageHandling and readSideProcessing
+    ledgerService and kafkaMessageHandling and readSideProcessing
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
