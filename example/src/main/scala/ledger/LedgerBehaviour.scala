@@ -45,15 +45,14 @@ object LedgerServer extends ServerMain {
 
   // dependency injection wiring
   private val memoryStore = EventJournalStore.memory[String, LedgerEvent]
-
-  private val readSideOffsetStore = ZLayer.fromEffect{
-    KeyValueStore.memory[String, Long]
-  }
   private val eventJournalStore = ZLayer.fromEffect(memoryStore.map[EventJournal[String, LedgerEvent]](identity))
-  private val journalQueryStore = ZLayer.fromEffect(memoryStore.map[JournalQuery[Long, String, LedgerEvent]](identity))
-  private val committableJournalQueryStore =  ZLayer.fromServices{
-    (offsetStore: KeyValueStore[String, Long], journal: JournalQuery[Long, String, LedgerEvent]) => new CommittableJournalStore[Long, String, LedgerEvent ](offsetStore, journal) :CommittableJournalQuery[Long, String, LedgerEvent]
+  private val committableJournalQueryStore =  ZLayer.fromEffect{
+      for {
+        readSideOffsetStore <- KeyValueStore.memory[String, Long]
+        journalQueryStore <- memoryStore.map[JournalQuery[Long, String, LedgerEvent]](identity)
+      } yield (new CommittableJournalStore[Long, String, LedgerEvent ](readSideOffsetStore, journalQueryStore) :CommittableJournalQuery[Long, String, LedgerEvent])
   }
+
   private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
 
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
@@ -65,7 +64,7 @@ object LedgerServer extends ServerMain {
     )
 
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
-  private val readSideProcessing = (readSideOffsetStore and journalQueryStore to committableJournalQueryStore and entity) to ReadSideProcessor.live
+  private val readSideProcessing = (committableJournalQueryStore and entity) to ReadSideProcessor.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
     (entity and liveAlgebra to LedgerService.live) and kafkaMessageHandling and readSideProcessing
