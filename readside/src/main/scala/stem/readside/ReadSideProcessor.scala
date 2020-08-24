@@ -8,29 +8,30 @@ import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
 import akka.pattern.{BackoffOpts, BackoffSupervisor, ask}
 import akka.util.Timeout
 import stem.readside.ReadSideProcessing.KillSwitch
-import stem.readside.ReadSideWorker.KeepRunning
+import stem.readside.ReadSideWorkerActor.KeepRunning
 import zio.{Task, ZEnv}
 import zio.Runtime
 import ReadSideProcessing.Process
 
 import scala.concurrent.duration.{FiniteDuration, _}
+
 final class ReadSideProcessing private(system: ActorSystem) {
 
   /**
    * Starts `processes` distributed over underlying akka cluster.
    *
-   * @param name - type name of underlying cluster sharding
+   * @param name      - type name of underlying cluster sharding
    * @param processes - list of processes to distribute
    *
    */
   def start(name: String,
-                          processes: List[Process],
-                          settings: ReadSideSettings =
-                          ReadSideSettings.default(system))(implicit runtime: Runtime[ZEnv]): Task[KillSwitch] =
+            processes: List[Process],
+            settings: ReadSideSettings =
+            ReadSideSettings.default(system))(implicit runtime: Runtime[ZEnv]): Task[KillSwitch] =
     Task {
       val opts = BackoffOpts
         .onFailure(
-          ReadSideWorker.props(processes, name),
+          ReadSideWorkerActor.props(processes, name),
           "worker",
           settings.minBackoff,
           settings.maxBackoff,
@@ -44,11 +45,11 @@ final class ReadSideProcessing private(system: ActorSystem) {
         entityProps = props,
         settings = settings.clusterShardingSettings,
         extractEntityId = {
-          case c @ KeepRunning(workerId) => (workerId.toString, c)
+          case c@KeepRunning(workerId) => (workerId.toString, c)
         },
         extractShardId = {
           case KeepRunning(workerId) => (workerId % settings.numberOfShards).toString
-          case other                 => throw new IllegalArgumentException(s"Unexpected message [$other]")
+          case other => throw new IllegalArgumentException(s"Unexpected message [$other]")
         }
       )
 
@@ -60,7 +61,7 @@ final class ReadSideProcessing private(system: ActorSystem) {
       )
       implicit val timeout = Timeout(settings.shutdownTimeout)
       KillSwitch {
-        Task.fromFuture( ec =>
+        Task.fromFuture(ec =>
           regionSupervisor ? ReadSideSupervisor.GracefulShutdown
         ).unit
       }
@@ -69,9 +70,13 @@ final class ReadSideProcessing private(system: ActorSystem) {
 
 object ReadSideProcessing {
   def apply(system: ActorSystem): ReadSideProcessing = new ReadSideProcessing(system)
+
   final case class KillSwitch(shutdown: Task[Unit]) extends AnyVal
+
   final case class RunningProcess(watchTermination: Task[Unit], shutdown: Task[Unit])
+
   final case class Process(run: Task[RunningProcess]) extends AnyVal
+
 }
 
 final case class ReadSideSettings(minBackoff: FiniteDuration,

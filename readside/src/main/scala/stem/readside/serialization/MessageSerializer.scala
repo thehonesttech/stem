@@ -2,7 +2,7 @@ package stem.readside.serialization
 
 import akka.actor.ExtendedActorSystem
 import akka.serialization.{BaseSerializer, SerializerWithStringManifest}
-import stem.readside.ReadSideWorker.KeepRunning
+import stem.readside.ReadSideWorkerActor.KeepRunning
 
 class MessageSerializer(val system: ExtendedActorSystem) extends SerializerWithStringManifest with BaseSerializer {
   val KeepRunningManifest = "A"

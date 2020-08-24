@@ -3,13 +3,16 @@ package stem.readside
 import akka.actor.{Actor, ActorLogging, ActorRef, Props, Terminated}
 import akka.cluster.sharding.ShardRegion
 import stem.readside.ReadSideSupervisor.{GracefulShutdown, ShutdownCompleted, Tick}
-import stem.readside.ReadSideWorker.KeepRunning
+import stem.readside.ReadSideWorkerActor.KeepRunning
 
 import scala.concurrent.duration.{FiniteDuration, _}
 
 object ReadSideSupervisor {
+
   private final case object Tick
+
   final case object GracefulShutdown
+
   final case object ShutdownCompleted
 
   def props(processCount: Int, shardRegion: ActorRef, heartbeatInterval: FiniteDuration): Props =

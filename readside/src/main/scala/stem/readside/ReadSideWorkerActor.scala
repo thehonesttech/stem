@@ -2,26 +2,26 @@ package stem.readside
 
 import akka.actor.{Actor, ActorLogging, Props, Status}
 import stem.readside.ReadSideProcessing.RunningProcess
-import stem.readside.ReadSideWorker.KeepRunning
+import stem.readside.ReadSideWorkerActor.KeepRunning
 import stem.readside.serialization.Message
 import zio.{Runtime, Task, ZEnv}
 import ReadSideProcessing.Process
 import akka.pattern._
 
-
-object ReadSideWorker {
+object ReadSideWorkerActor {
   def props(processWithId: Int => Process, processName: String)(implicit runtime: Runtime[ZEnv]): Props =
-    Props(new ReadSideWorker(processWithId, processName))
+    Props(new ReadSideWorkerActor(processWithId, processName))
 
   final case class KeepRunning(workerId: Int) extends Message
 
 }
 
-
-final class ReadSideWorker(
-                            processFor: Int => Process,
-                            processName: String
-                          )(implicit val runtime: Runtime[ZEnv]) extends Actor with ActorLogging {
+final class ReadSideWorkerActor(
+  processFor: Int => Process,
+  processName: String
+)(implicit val runtime: Runtime[ZEnv])
+    extends Actor
+    with ActorLogging {
 
   import context.dispatcher
 
@@ -37,8 +37,10 @@ final class ReadSideWorker(
   def receive: Receive = {
     case KeepRunning(workerId) =>
       log.info("[{}] Starting process {}", workerId, processName)
-      runtime.unsafeRunToFuture(processFor(workerId).run
-        .map(ProcessStarted)) pipeTo self
+      runtime.unsafeRunToFuture(
+        processFor(workerId).run
+          .map(ProcessStarted)
+      ) pipeTo self
       context.become {
         case ProcessStarted(RunningProcess(watchTermination, terminate)) =>
           log.info("[{}] Process started {}", workerId, processName)

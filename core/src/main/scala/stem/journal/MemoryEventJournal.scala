@@ -10,18 +10,18 @@ import zio.stream.ZStream
 import scala.concurrent.duration.FiniteDuration
 
 class MemoryEventJournal[Key, Event](
-  pollingInterval: FiniteDuration,
-  internal: Ref[Map[Key, Chunk[(Long, Event, List[String])]]]
-) extends EventJournal[Key, Event]
-    with JournalQuery[Long, Key, Event] {
+                                      pollingInterval: FiniteDuration,
+                                      internal: Ref[Map[Key, Chunk[(Long, Event, List[String])]]]
+                                    ) extends EventJournal[Key, Event]
+  with JournalQuery[Long, Key, Event] {
   override def append(key: Key, offset: Long, events: NonEmptyChunk[Event]): RIO[HasTagging, Unit] =
     ZIO.accessM { tagging =>
       internal.update { state: Map[Key, Chunk[(Long, Event, List[String])]] =>
         val tags = tagging.tag(key).map(_.value).toList
         val oldValue: Chunk[(Long, Event, List[String])] = state.getOrElse(key, Chunk.empty)
         val newValue: (Key, Chunk[(Long, Event, List[String])]) = key -> (oldValue ++ events.zipWithIndex.map {
-            case (event, index) => (index + offset, event, tags)
-          })
+          case (event, index) => (index + offset, event, tags)
+        })
         state + newValue
       }
     }
@@ -35,11 +35,11 @@ class MemoryEventJournal[Key, Event](
     stream.Stream.fromIterableM(a)
   }
 
-  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Nothing, (Long, EntityEvent[Key, Event])] = {
+  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Nothing, JournalEntry[Long, Key, Event]] = {
     stream.Stream.fromSchedule(Schedule.spaced(Duration.fromNanos(pollingInterval.toNanos))) *> currentEventsByTag(tag, offset)
   }
 
-  override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Nothing, (Long, EntityEvent[Key, Event])] = {
+  override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Nothing, JournalEntry[Long, Key, Event]] = {
     val a = internal.get.map { state =>
       state
         .flatMap {
@@ -52,7 +52,7 @@ class MemoryEventJournal[Key, Event](
         .sortBy(_._2)
         .drop(offset.getOrElse(0L).toInt)
         .collect {
-          case (key, offset, event, tagList) if tagList.contains(tag.value) => offset -> EntityEvent(key, offset, event)
+          case (key, offset, event, tagList) if tagList.contains(tag.value) => JournalEntry(offset, EntityEvent(key, offset, event))
         }
     }
 
