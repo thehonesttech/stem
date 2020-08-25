@@ -45,8 +45,6 @@ lazy val root = (project in file("."))
     commonSettings
   )
 
-val testDeps = Seq(
-  )
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",

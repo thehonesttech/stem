@@ -7,11 +7,9 @@ import akka.actor.ActorSystem
 import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
 import akka.pattern.{BackoffOpts, BackoffSupervisor, ask}
 import akka.util.Timeout
-import stem.readside.ReadSideProcessing.KillSwitch
+import stem.readside.ReadSideProcessing.{KillSwitch, Process}
 import stem.readside.ReadSideWorkerActor.KeepRunning
-import zio.{Has, Runtime, Task, ZEnv, ZIO}
-import ReadSideProcessing.Process
-import stem.data.{ConsumerId, Tagging}
+import zio.{Runtime, Task, ZEnv}
 
 import scala.concurrent.duration.{FiniteDuration, _}
 
