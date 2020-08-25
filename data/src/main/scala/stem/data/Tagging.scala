@@ -1,6 +1,4 @@
-package stem.tagging
-
-import stem.data.EventTag
+package stem.data
 
 sealed abstract class Tagging[-A] {
   def tag(a: A): Set[EventTag]

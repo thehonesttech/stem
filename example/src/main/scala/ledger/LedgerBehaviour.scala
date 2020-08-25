@@ -16,14 +16,14 @@ import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaGrpcCo
 import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
-import stem.data.{AlgebraCombinators, ConsumerId, EventTag, StemProtocol, TagConsumer}
+import stem.data.{AlgebraCombinators, ConsumerId, EventTag, StemProtocol, TagConsumer, Tagging}
 import stem.journal.EventJournal
+import stem.readside.ReadSideProcessing.{Process, RunningProcess}
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
 import stem.runtime.readside.{CommittableJournalQuery, CommittableJournalStore, JournalQuery}
 import stem.runtime.{AlgebraTransformer, EventJournalStore, Fold, KeyValueStore}
 import stem.snapshot.KeyValueStore
-import stem.tagging.Tagging
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
@@ -64,7 +64,7 @@ object LedgerServer extends ServerMain {
 
   private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to MessageHandler.live
-  private val readSideProcessing = (committableJournalQueryStore and entity) to ReadSideProcessor.live
+  private val readSideProcessing = (ZEnv.live and (actorSystem to ReadSideProcessor.readSideProcessing) and committableJournalQueryStore and entity) to ReadSideProcessor.live
   private val ledgerService = entity and liveAlgebra to LedgerService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
@@ -124,7 +124,6 @@ object LedgerEntity {
 
   val tagging = Tagging.const(EventTag("Ledger"))
 
-  // TODO: setup kafka
   val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[String => LedgerCommandHandler]] = ZLayer.fromEffect {
     memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
       "Ledger",
@@ -135,25 +134,27 @@ object LedgerEntity {
 }
 
 object ReadSideProcessor {
-  def live =
-    ZLayer.fromServices { (journalQuery: CommittableJournalQuery[Long, String, LedgerEvent], ledgers: Ledgers) =>
-      val processor = new LedgerProcessor(ledgers)
-      val consumerId = ConsumerId("processing")
-      tagging.tags.map { tag =>
-        journalQuery.eventsByTag(tag, consumerId)
 
-      }
-      ()
+  import stem.readside.ReadSideProcessing
 
-    }
+  implicit val runtime = LedgerServer
 
-  private def readSideProcessorLogic(ledgers: Ledgers) = {
 
-    ???
+  val readSideProcessing = ZLayer.fromService { (actorSystem: ActorSystem) =>
+    ReadSideProcessing(actorSystem)
   }
 
+  val live = ZLayer.fromEffect {
+      ZIO.accessM { ledgers: Has[Ledgers] =>
+        val processor = new LedgerProcessor(ledgers.get)
+        val consumerId = ConsumerId("processing")
+        StemApp.readSide[String, LedgerEvent, Long]("LedgerReadSide", consumerId, tagging, processor.process)
+      }
+    }
+
+
   final class LedgerProcessor(ledgers: Ledgers) {
-    def process(ledgerEvent: LedgerEvent): Task[Unit] = {
+    def process(key: String, ledgerEvent: LedgerEvent): Task[Unit] = {
       ???
     }
   }

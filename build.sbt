@@ -23,13 +23,14 @@ def stemModule(id: String, description: String): Project =
 
 lazy val `core` = stemModule("core", "Core framework")
   .dependsOn(`data`)
+  .dependsOn(`readside`)
   .dependsOn(`macros`)
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
-lazy val `readside` = stemModule("readside", "Read side views").settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
+lazy val `readside` = stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
-lazy val `example` = stemModule("example", "Ledger example").dependsOn(`core`, `macros`).settings(commonProtobufSettings)
+lazy val `example` = stemModule("example", "Ledger example").dependsOn(`core`, `macros`, `readside`).settings(commonProtobufSettings)
 
 lazy val root = (project in file("."))
   .settings(

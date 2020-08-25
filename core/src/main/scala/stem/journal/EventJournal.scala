@@ -1,6 +1,6 @@
 package stem.journal
 
-import stem.tagging.Tagging
+import stem.data.Tagging
 import zio.{NonEmptyChunk, RIO, Task}
 import zio.stream.Stream
 

@@ -1,11 +1,10 @@
 package stem.runtime
 
 import izumi.reflect.Tag
-import stem.data.Versioned
+import stem.data.{Tagging, Versioned}
 import stem.journal.{EventJournal, MemoryEventJournal}
 import stem.runtime.readside.JournalQuery
 import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
-import stem.tagging.Tagging
 import zio.{Ref, _}
 
 /**

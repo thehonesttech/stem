@@ -2,9 +2,15 @@ package stem
 
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
-import stem.data.AlgebraCombinators
+import stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
 import stem.data.AlgebraCombinators.Combinators
-import zio.{Has, IO, Managed, Tag, Task, ULayer, ZIO, ZLayer}
+import stem.journal.JournalEntry
+import stem.readside.ReadSideProcessing
+import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
+import stem.runtime.readside.CommittableJournalQuery
+import zio.clock.Clock
+import zio.stream.ZStream
+import zio.{stream, Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 // idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error
 
@@ -27,6 +33,60 @@ object StemApp {
     ZLayer.fromManaged(
       Managed.make(Task(ActorSystem(name, ConfigFactory.load(confFileName))))(sys => Task.fromFuture(_ => sys.terminate()).either)
     )
+
+  def readSide[Id: Tag, Event: Tag, Offset: Tag](
+    name: String,
+    consumerId: ConsumerId,
+    tagging: Tagging[Id],
+    logic: (Id, Event) => Task[Unit]
+  )(
+    implicit runtime: Runtime[ZEnv]
+  ): ZIO[ZEnv with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+    // use logic
+    ZIO.accessM { layers =>
+      val readSideProcessing = layers.get[ReadSideProcessing]
+      val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
+      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
+        journal.eventsByTag(tag, consumerId)
+      }
+      // convert into process
+      val interruptibleStreamsAndProcesses: ZIO[
+        Any,
+        Nothing,
+        (ZStream[Any, Nothing, ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]], Seq[Process])
+      ] = for {
+        queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
+        processes = sources.map { s =>
+          Process {
+            zio.Promise.make[Throwable, Unit].flatMap { stopped =>
+              (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork.map { fiber =>
+                RunningProcess(fiber.join.as(), stopped.succeed().as())
+              }
+            }
+          }
+        }
+      } yield (ZStream.fromQueue(queue), processes)
+      interruptibleStreamsAndProcesses.flatMap {
+        case (streamOfStreams, processes) =>
+          readSideProcessing.start(name, processes.toList).flatMap { ks =>
+            import zio.duration._
+            ZStream
+              .mergeAll(processes.size)(streamOfStreams.map { s =>
+                s.mapMPar(30)(_.traverse { committable =>
+                    val key = committable.event.entityKey
+                    val event = committable.event.payload
+                    logic(key, event)
+                  })
+                  .runDrain
+                  .retry(Schedule.spaced(1.seconds))
+
+              })
+              .runDrain
+              .as(ks)
+          }
+      }
+    }
+  }
 
   implicit def clientCombinators[State, Event, Reject, Result](
     from: ZIO[AlgebraCombinators[State, Event, Reject], Reject, Result]

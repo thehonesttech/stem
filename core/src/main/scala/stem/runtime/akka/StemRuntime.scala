@@ -8,12 +8,11 @@ import akka.pattern.ask
 import akka.util.Timeout
 import izumi.reflect.Tag
 import scodec.bits.BitVector
-import stem.data.{StemProtocol, Versioned}
+import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
 import stem.runtime.{BaseAlgebraCombinators, EventJournalStore, KeyValueStore}
 import stem.runtime.LiveBaseAlgebraCombinators.memory
 import stem.runtime.akka.serialization.Message
-import stem.tagging.Tagging
 import zio.{Has, Runtime, Task, ZEnv, ZIO}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
