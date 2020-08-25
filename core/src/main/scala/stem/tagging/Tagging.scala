@@ -1,5 +1,7 @@
 package stem.tagging
 
+import stem.data.EventTag
+
 sealed abstract class Tagging[-A] {
   def tag(a: A): Set[EventTag]
   def tags: List[EventTag]
@@ -24,4 +26,3 @@ object Tagging {
 
 }
 
-final case class EventTag(value: String) extends AnyVal

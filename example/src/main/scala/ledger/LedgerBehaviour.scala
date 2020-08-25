@@ -16,14 +16,14 @@ import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaGrpcCo
 import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.Combinators
-import stem.data.{AlgebraCombinators, ConsumerId, StemProtocol}
+import stem.data.{AlgebraCombinators, ConsumerId, EventTag, StemProtocol, TagConsumer}
 import stem.journal.EventJournal
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
 import stem.runtime.readside.{CommittableJournalQuery, CommittableJournalStore, JournalQuery}
 import stem.runtime.{AlgebraTransformer, EventJournalStore, Fold, KeyValueStore}
 import stem.snapshot.KeyValueStore
-import stem.tagging.{EventTag, Tagging}
+import stem.tagging.Tagging
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
@@ -46,11 +46,11 @@ object LedgerServer extends ServerMain {
   // dependency injection wiring
   private val memoryStore = EventJournalStore.memory[String, LedgerEvent]
   private val eventJournalStore = ZLayer.fromEffect(memoryStore.map[EventJournal[String, LedgerEvent]](identity))
-  private val committableJournalQueryStore =  ZLayer.fromEffect{
-      for {
-        readSideOffsetStore <- KeyValueStore.memory[String, Long]
-        journalQueryStore <- memoryStore.map[JournalQuery[Long, String, LedgerEvent]](identity)
-      } yield (new CommittableJournalStore[Long, String, LedgerEvent ](readSideOffsetStore, journalQueryStore) :CommittableJournalQuery[Long, String, LedgerEvent])
+  private val committableJournalQueryStore = ZLayer.fromEffect {
+    for {
+      readSideOffsetStore <- KeyValueStore.memory[TagConsumer, Long]
+      journalQueryStore <- memoryStore.map[JournalQuery[Long, String, LedgerEvent]](identity)
+    } yield (new CommittableJournalStore[Long, String, LedgerEvent](readSideOffsetStore, journalQueryStore): CommittableJournalQuery[Long, String, LedgerEvent])
   }
 
 

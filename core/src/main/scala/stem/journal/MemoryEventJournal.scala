@@ -1,7 +1,7 @@
 package stem.journal
 
+import stem.data.EventTag
 import stem.runtime.readside.JournalQuery
-import stem.tagging.EventTag
 import zio._
 import zio.clock.Clock
 import zio.duration.Duration
@@ -35,11 +35,11 @@ class MemoryEventJournal[Key, Event](
     stream.Stream.fromIterableM(a)
   }
 
-  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Nothing, JournalEntry[Long, Key, Event]] = {
+  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Throwable, JournalEntry[Long, Key, Event]] = {
     stream.Stream.fromSchedule(Schedule.spaced(Duration.fromNanos(pollingInterval.toNanos))) *> currentEventsByTag(tag, offset)
   }
 
-  override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Nothing, JournalEntry[Long, Key, Event]] = {
+  override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
     val a = internal.get.map { state =>
       state
         .flatMap {
