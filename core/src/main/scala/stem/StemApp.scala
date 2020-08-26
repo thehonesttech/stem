@@ -2,15 +2,15 @@ package stem
 
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
-import stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
 import stem.data.AlgebraCombinators.Combinators
+import stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
 import stem.journal.JournalEntry
 import stem.readside.ReadSideProcessing
 import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
 import stem.runtime.readside.CommittableJournalQuery
 import zio.clock.Clock
 import zio.stream.ZStream
-import zio.{stream, Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 // idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error
 
@@ -66,6 +66,7 @@ object StemApp {
           }
         }
       } yield (ZStream.fromQueue(queue), processes)
+
       interruptibleStreamsAndProcesses.flatMap {
         case (streamOfStreams, processes) =>
           readSideProcessing.start(name, processes.toList).flatMap { ks =>

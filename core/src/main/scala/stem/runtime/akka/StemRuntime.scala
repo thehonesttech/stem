@@ -12,9 +12,11 @@ import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
 import stem.runtime.{BaseAlgebraCombinators, EventJournalStore, KeyValueStore}
 import stem.runtime.LiveBaseAlgebraCombinators.memory
+import stem.runtime.akka.StemRuntime.KeyedCommand
 import stem.runtime.akka.serialization.Message
-import zio.{Has, Runtime, Task, ZEnv, ZIO}
+import zio.{Has, IO, Runtime, Task, ZEnv, ZIO}
 
+import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 object StemRuntime {
@@ -33,9 +35,9 @@ object StemRuntime {
       val memoryEventJournal = layer.get[EventJournal[Key, Event]]
       for {
         memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
-        snapshotKeyValueStore <- KeyValueStore.memory[Key, Versioned[State]]
-        combinators <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
-        ledger <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
+        snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
+        combinators                   <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
+        ledger                        <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
       } yield ledger
     }
   }
@@ -76,32 +78,42 @@ object StemRuntime {
     val keyEncoder = KeyEncoder[Key]
 
     // macro that creates bytes when method is invoked
-
-    key: Key =>
-      {
-
-        implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
-        // implementation of algebra that transform the method in bytes inject the function in it
-        protocol.client(
-          { bytes =>
-            Task
-              .fromFuture { _ =>
-                shardRegion ? KeyedCommand(keyEncoder(key), bytes)
-              }
-              .flatMap {
-                case result: CommandResult =>
-                  Task.succeed(result.bytes)
-                case other =>
-                  Task.fail(
-                    new IllegalArgumentException(s"Unexpected response [$other] from shard region")
-                  )
-              }
-          },
-          eventSourcedBehaviour.errorHandler
-        )
-      }
+    KeyAlgebraSender.keyToAlgebra(
+      (key: Key, bytes: BitVector) => {
+        IO.fromFuture { _ =>
+            implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
+            shardRegion ? KeyedCommand(keyEncoder(key), bytes)
+          }
+          .mapError(eventSourcedBehaviour.errorHandler)
+      },
+      eventSourcedBehaviour.errorHandler
+    )
   }
 
+}
+
+object KeyAlgebraSender {
+  def keyToAlgebra[Key, Algebra, State, Event, Reject](senderFn: (Key, BitVector) => IO[Reject, Any], errorHandler: Throwable => Reject)(
+    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  ): Key => Algebra = { key: Key =>
+    {
+      // implementation of algebra that transform the method in bytes inject the function in it
+      protocol.client(
+        { bytes =>
+          senderFn(key, bytes)
+            .flatMap {
+              case result: CommandResult =>
+                IO.succeed(result.bytes)
+              case other =>
+                IO.fail(
+                  errorHandler(new IllegalArgumentException(s"Unexpected response [$other] from shard region"))
+                )
+            }
+        },
+        errorHandler
+      )
+    }
+  }
 }
 
 final case class RuntimeSettings(
@@ -115,11 +127,13 @@ object RuntimeSettings {
 
   /**
     * Reads config from `stem.akka-runtime`, see stem.conf for details
+    *
     * @param system Actor system to get config from
     * @return default settings
     */
   def default(system: ActorSystem): RuntimeSettings = {
     val config = system.settings.config.getConfig("stem.akka-runtime")
+
     def getMillisDuration(path: String): FiniteDuration =
       Duration(config.getDuration(path, TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 

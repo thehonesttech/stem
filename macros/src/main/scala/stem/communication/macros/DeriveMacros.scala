@@ -9,7 +9,14 @@ class DeriveMacros(val c: blackbox.Context) {
   import c.universe._
 
   /** A reified method definition with some useful methods for transforming it. */
-  case class Method(m: MethodSymbol, typeParams: List[TypeDef], paramList: List[List[ValDef]], returnType: Type, body: Tree, hint: Option[Int] = None) {
+  case class Method(
+    m: MethodSymbol,
+    typeParams: List[TypeDef],
+    paramList: List[List[ValDef]],
+    returnType: Type,
+    body: Tree,
+    hint: Option[Int] = None
+  ) {
     def typeArgs: List[Type] = for (tp <- typeParams) yield typeRef(NoPrefix, tp.symbol, Nil)
 
     def paramLists(f: Type => Type): List[List[ValDef]] =
@@ -32,7 +39,7 @@ class DeriveMacros(val c: blackbox.Context) {
       m =>
         m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
           m.owner
-        )
+      )
     )
   }
 
@@ -40,7 +47,7 @@ class DeriveMacros(val c: blackbox.Context) {
     for (member <- overridableMembersOf(algebra) if member.isMethod && member.asMethod.isPublic && !member.asMethod.isAccessor)
       yield {
         val method = member.asMethod
-        val methodIdValue = member.annotations.collectFirst{
+        val methodIdValue = member.annotations.collectFirst {
           case a if a.tree.tpe.dealias <:< typeOf[MethodId].dealias =>
             val Literal(Constant(value: Int)) = a.tree.children.tail.head
             value
@@ -65,15 +72,14 @@ class DeriveMacros(val c: blackbox.Context) {
         )
       }
 
-
   def stubMethodsForClient(
-                            methods: Iterable[Method],
-                            state: c.universe.Type,
-                            event: c.universe.Type,
-                            reject: c.universe.Type
-                          ): Iterable[c.universe.Tree] = {
+    methods: Iterable[Method],
+    state: c.universe.Type,
+    event: c.universe.Type,
+    reject: c.universe.Type
+  ): Iterable[c.universe.Tree] = {
     methods.zipWithIndex.map {
-      case (method@Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
+      case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
 //        println(s"OutParams $outParams on method $method")
         val out = outParams.last
         val paramTypes = paramList.flatten.map(_.tpt)
@@ -94,25 +100,25 @@ class DeriveMacros(val c: blackbox.Context) {
 
                        // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
                        (for {
-                         tupleEncoded <- Task.fromTry(codecInput.encode(tuple).toTry)
+                         tupleEncoded <- IO.fromTry(codecInput.encode(tuple).toTry).mapError(errorHandler)
 
                          // start common code
-                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry)
+                         arguments <- IO.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
                          vector    <- commFn(arguments)
                          // end of common code
-                         decoded <- Task.fromTry(codecResult.decodeValue(vector).toTry)
-                       } yield decoded).mapError(errorHandler)
+                         decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
+                       } yield decoded)
                      }"""
         method.copy(body = newBody).definition
     }
   }
 
   def derive[Algebra, State, Event, Reject](
-                                             implicit algebraTag: c.WeakTypeTag[Algebra],
-                                             statetag: c.WeakTypeTag[State],
-                                             eventtag: c.WeakTypeTag[Event],
-                                             rejecttag: c.WeakTypeTag[Reject]
-                                           ): c.Tree = {
+    implicit algebraTag: c.WeakTypeTag[Algebra],
+    statetag: c.WeakTypeTag[State],
+    eventtag: c.WeakTypeTag[Event],
+    rejecttag: c.WeakTypeTag[Reject]
+  ): c.Tree = {
     import c.universe._
 
     val algebra: c.universe.Type = algebraTag.tpe.typeConstructor.dealias
@@ -175,8 +181,8 @@ class DeriveMacros(val c: blackbox.Context) {
             import stem.data.AlgebraCombinators
 
              private val mainCodec = codec[(String, BitVector)]
-             val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
-               (commFn: BitVector => Task[BitVector], errorHandler: Throwable => $reject) =>
+             val client: (BitVector => IO[$reject, BitVector], Throwable => $reject) => $algebra =
+               (commFn: BitVector => IO[$reject, BitVector], errorHandler: Throwable => $reject) =>
                  new $algebra { ..$stubbedMethods }
 
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =

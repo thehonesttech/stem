@@ -1,15 +1,15 @@
 import scalapb.compiler.Version.scalapbVersion
-val grpcVersion = "1.30.2"
 
+val grpcVersion = "1.30.2"
 
 lazy val commonProtobufSettings = Seq(
   PB.protoSources.in(Compile) := Seq(
-      baseDirectory.value / "src/schemas/protobuf"
-    ),
+    baseDirectory.value / "src/schemas/protobuf"
+  ),
   PB.targets in Compile := Seq(
-      scalapb.gen(grpc = true, flatPackage = false)          -> (sourceManaged in Compile).value,
-      scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value
-    )
+    scalapb.gen(grpc = true, flatPackage = false) -> (sourceManaged in Compile).value,
+    scalapb.zio_grpc.ZioCodeGenerator             -> (sourceManaged in Compile).value
+  )
 )
 
 lazy val commonSettings = Seq(
@@ -28,9 +28,13 @@ lazy val `core` = stemModule("core", "Core framework")
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
-lazy val `readside` = stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
+lazy val `readside` =
+  stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
-lazy val `example` = stemModule("example", "Ledger example").dependsOn(`core`, `macros`, `readside`).settings(commonProtobufSettings)
+lazy val `example` = stemModule("example", "Ledger example")
+  .dependsOn(`core`, `macros`, `readside`)
+  .settings(libraryDependencies ++= testDeps)
+  .settings(commonProtobufSettings)
 
 lazy val root = (project in file("."))
   .settings(
@@ -45,6 +49,14 @@ lazy val root = (project in file("."))
     commonSettings
   )
 
+val testDeps = Seq(
+  "org.scalatest" %% "scalatest" % "3.1.1" % Test,
+  "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
+  "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
+  "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
+  "dev.zio" %% "zio-test" % "1.0.0" % Test,
+  "dev.zio" %% "zio-test-sbt" % "1.0.0" % Test
+)
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",
@@ -63,10 +75,6 @@ val allDeps = Seq(
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0" % "protobuf",
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0",
   "io.grpc" % "grpc-netty" % grpcVersion,
-  "org.scalatest" %% "scalatest" % "3.1.1" % Test,
-  "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
-  "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
-  "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test
-)
+) ++ testDeps
 
 aggregateProjects(`core`, `example`, `data`, `readside`, `macros`)

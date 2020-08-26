@@ -28,8 +28,6 @@ trait BaseAlgebraCombinators[Key, State, Event, Reject] {
 }
 
 class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
-  // TODO use a better type for the tag
-  //  tag: String,
   state: Ref[Option[State]],
   eventJournalOffsetStore: KeyValueStore[Key, Long],
   tagging: Tagging[Key],

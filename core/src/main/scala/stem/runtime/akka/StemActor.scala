@@ -65,7 +65,7 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       //macro creates a map of functions of path -> Invocation
 //      val invocation: Invocation[State, Event, Reject] = RpcMacro.server[Algebra, State, Event, Reject](eventsourcedBehavior.algebra)
       val invocation: Invocation[State, Event, Reject] =
-        protocol.server.apply(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
+        protocol.server(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
 
       sender() ! runtime
         .unsafeRunToFuture(

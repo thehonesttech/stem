@@ -6,7 +6,7 @@ import stem.runtime.{EventJournalStore, KeyValueStore}
 import stem.snapshot.KeyValueStore
 import zio.clock.Clock
 import zio.stream.{Stream, ZStream}
-import zio.{Has, Tag, ZLayer, stream}
+import zio.{Has, Tag, Task, ZLayer, stream}
 
 // implementations should commit into offset store
 trait JournalQuery[O, K, E] {
@@ -57,6 +57,14 @@ object JournalStores {
     ZLayer.fromEffect(res.map(_._1)) -> ZLayer.fromEffect(res.map(_._2))
 
   }
+}
+
+object Stores {
+
+  def live[K, E, S]: Task[Stores[K, E, S]] = ???
+
+  def memory[K, E, S]: Task[Stores[K, E, S]] = ???
+
 }
 
 case class Stores[K, E, S](
