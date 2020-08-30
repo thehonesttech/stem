@@ -31,6 +31,7 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
   private val keyString: String =
     URLDecoder.decode(self.path.name, StandardCharsets.UTF_8.name())
 
+  // TODO set algebra combinator in order to avoid to instantiate on every command
   private val state = Ref.make[Option[State]](None)
 
   private val key: Key = KeyDecoder[Key]

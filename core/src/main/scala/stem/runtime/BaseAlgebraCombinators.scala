@@ -64,7 +64,6 @@ object AlgebraCombinatorConfig {
 }
 
 // TODO make this a module
-// TODO this state must be by ID! not global!
 class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   key: Key,
   state: Ref[Option[State]],
@@ -75,7 +74,6 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   type Offset = Long
 
   override def read: Task[State] = {
-
     val result = state.get.flatMap {
       case Some(state) =>
         IO.succeed(state)

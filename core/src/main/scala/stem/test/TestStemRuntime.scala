@@ -9,7 +9,7 @@ import stem.data.{AlgebraCombinators, StemProtocol, Tagging, Versioned}
 import stem.journal.MemoryEventJournal
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender, KeyDecoder, KeyEncoder}
 import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, Fold, KeyValueStore, KeyedAlgebraCombinators}
-import zio.{Has, IO, Ref, Runtime, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, IO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration._
 
@@ -41,36 +41,47 @@ object TestStemRuntime {
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event] //default combinator that tracks events and states
   )(implicit protocol: StemProtocol[Algebra, State, Event, Reject]): Key => Algebra = {
     val errorHandler: Throwable => Reject = eventSourcedBehaviour.errorHandler
+    var combinatorMap: Map[Key, UIO[AlgebraCombinators[State, Event, Reject]]] =
+      Map[Key, UIO[AlgebraCombinators[State, Event, Reject]]]()
 
     KeyAlgebraSender.keyToAlgebra[Key, Algebra, State, Event, Reject](
       { (key: Key, bytes: BitVector) =>
-        println(s"Calling with key $key")
-        val algebraCombinators = Ref
-          .make[Option[State]](None)
-          .map(
-            state =>
-              new KeyedAlgebraCombinators[Key, State, Event, Reject](
-                key,
-                state,
-                eventSourcedBehaviour.eventHandler,
-                algebraCombinatorConfig
-            )
-          )
+        val algebraCombinators: UIO[AlgebraCombinators[State, Event, Reject]] = (for {
+          combinatorRetrieved <- combinatorMap.get(key) match {
+            case Some(combinator) =>
+              combinator
+            case None =>
+              Ref
+                .make[Option[State]](None)
+                .map {
+                  state =>
+                    val combinators = new KeyedAlgebraCombinators[Key, State, Event, Reject](
+                      key,
+                      state,
+                      eventSourcedBehaviour.eventHandler,
+                      algebraCombinatorConfig
+                    )
+                    new AlgebraCombinators[State, Event, Reject] {
+                      override def read: Task[State] = combinators.read
 
-        val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {
-          ZLayer.fromEffect(algebraCombinators.map { combinators =>
-            new AlgebraCombinators[State, Event, Reject] {
-              println(s"Building with Key $key")
-              override def read: Task[State] = combinators.read
+                      override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
 
-              override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
+                      override def ignore: Task[Unit] = combinators.ignore
 
-              override def ignore: Task[Unit] = combinators.ignore
+                      override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
+                    }
+                }
+                .flatMap { combinator =>
+                  val uioCombinator = UIO.succeed(combinator)
+                   uioCombinator <* ZIO.effectTotal{
+                     combinatorMap = combinatorMap + (key -> uioCombinator)
+                   }
+                }
+          }
+        } yield (combinatorRetrieved))
 
-              override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
-            }
-          })
-        }
+        val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
+          ZLayer.fromEffect(algebraCombinators)
         val invocation = protocol.server(eventSourcedBehaviour.algebra, errorHandler)
         invocation
           .call(bytes)

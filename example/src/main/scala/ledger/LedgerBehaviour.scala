@@ -80,11 +80,9 @@ object LedgerEntity {
       import ops._
       (for {
         _ <- Task.unit
-        _ = println("Impl3 " +Instant.now())
+        //        _ = println("Impl3 " +Instant.now())
         state <- read
-        _ = println("Impl4 " +Instant.now())
-        state2 <- read
-        _ = println("Impl5 " +Instant.now())
+        //        _ = println("Impl4 " +Instant.now())
         _ <- append(AmountLocked(amount = Some(toLedgerBigDecimal(amount)), idempotencyKey = idempotencyKey))
       } yield Allowed).mapError(errorHandler)
     }
@@ -107,10 +105,9 @@ object LedgerEntity {
       case (oldState, event) =>
         val newState = event match {
           case _: AmountLocked =>
-            if (oldState % 2 == 0) oldState + 1
-            else oldState + 5
-          case _: LockReleased => 2
-          case _ => 3
+            oldState + 1
+          case _: LockReleased => 20
+          case _ => 30
         }
         Task.succeed(newState)
     }
@@ -154,6 +151,7 @@ object ReadSideProcessor {
       ???
     }
   }
+
 }
 
 

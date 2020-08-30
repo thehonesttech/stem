@@ -26,9 +26,12 @@ class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTrip
       // when a command happens, events are triggered and state updated
         (for {
           ledgers <- memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](Const(EventTag("testKey")), ledgerBehaviour).mapError(_ => "Error")
-          _ = println("C " +Instant.now())
+          _ = println("Implementation start " +Instant.now())
           result <- ledgers("key").lock(BigDecimal(10), "test1")
           result2 <- ledgers("key2").lock(BigDecimal(10), "test1")
+          result3 <- ledgers("key2").lock(BigDecimal(10), "testa1")
+          result4 <- ledgers("key2").lock(BigDecimal(10), "tesat1")
+          result5 <- ledgers("key3").lock(BigDecimal(10), "test1")
         } yield result).runSync should ===(Allowed)
       println("G " +Instant.now())
     }
