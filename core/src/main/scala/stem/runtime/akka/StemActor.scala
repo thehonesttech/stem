@@ -46,6 +46,8 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
     case _ => stash()
   }
 
+
+  // here key is available, so at this level we can store the state of the algebra
   private def onActions: Receive = {
     case CommandInvocation(bytes) =>
       // use macro to do this
