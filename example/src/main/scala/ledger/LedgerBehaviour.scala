@@ -1,5 +1,7 @@
 package ledger
 
+import java.time.Instant
+
 import akka.actor.ActorSystem
 import io.grpc.Status
 import ledger.LedgerEntity.{LedgerCommandHandler, tagging}
@@ -77,7 +79,12 @@ object LedgerEntity {
       val ops = opsL.get
       import ops._
       (for {
+        _ <- Task.unit
+        _ = println("Impl3 " +Instant.now())
         state <- read
+        _ = println("Impl4 " +Instant.now())
+        state2 <- read
+        _ = println("Impl5 " +Instant.now())
         _ <- append(AmountLocked(amount = Some(toLedgerBigDecimal(amount)), idempotencyKey = idempotencyKey))
       } yield Allowed).mapError(errorHandler)
     }
@@ -92,7 +99,7 @@ object LedgerEntity {
       ledger.eventsourcing.events.events.BigDecimal(bigDecimal.scale, bigDecimal.precision)
   }
 
-  private val errorHandler: Throwable => String = error => error.getMessage
+  val errorHandler: Throwable => String = error => error.getMessage
 
   val eventHandlerLogic: Fold[Int, LedgerEvent] = Fold(
     initial = 0,

@@ -32,22 +32,10 @@ object BoopickleCodec {
 
   implicit val bitVectorPickler = new Pickler[BitVector] {
     override def pickle(obj: BitVector)(implicit state: PickleState): Unit = {
-      state.identityRefFor(obj) match {
-        case Some(idx) => state.enc.writeInt(-idx)
-        case None =>
-          state.enc.writeByteBuffer(obj.toByteBuffer)
-          state.addIdentityRef(obj)
-      }
+      state.enc.writeByteBuffer(obj.toByteBuffer)
     }
     override def unpickle(implicit state: UnpickleState): BitVector = {
-      state.dec.readInt match {
-        case idx if idx < 0 =>
-          state.identityFor[BitVector](-idx)
-        case len =>
-          val bv = BitVector(state.dec.readByteBuffer)
-          state.addIdentityRef(bv)
-          bv
-      }
+      BitVector(state.dec.readByteBuffer)
     }
   }
 }

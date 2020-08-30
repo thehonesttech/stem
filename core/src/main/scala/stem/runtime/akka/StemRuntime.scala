@@ -10,13 +10,11 @@ import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
-import stem.runtime.{BaseAlgebraCombinators, EventJournalStore, KeyValueStore}
 import stem.runtime.LiveBaseAlgebraCombinators.memory
-import stem.runtime.akka.StemRuntime.KeyedCommand
 import stem.runtime.akka.serialization.Message
-import zio.{Has, IO, Runtime, Task, ZEnv, ZIO}
+import stem.runtime.{BaseAlgebraCombinators, KeyValueStore}
+import zio.{Has, IO, Runtime, ZEnv, ZIO}
 
-import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 object StemRuntime {
@@ -37,8 +35,8 @@ object StemRuntime {
         memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
         snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
         combinators                   <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
-        ledger                        <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
-      } yield ledger
+        algebra                        <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
+      } yield algebra
     }
   }
 

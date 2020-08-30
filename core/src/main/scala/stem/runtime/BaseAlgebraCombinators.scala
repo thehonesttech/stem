@@ -1,5 +1,7 @@
 package stem.runtime
 
+import java.time.Instant
+
 import izumi.reflect.Tag
 import stem.data.{Tagging, Versioned}
 import stem.journal.{EventJournal, MemoryEventJournal}
@@ -27,6 +29,8 @@ trait BaseAlgebraCombinators[Key, State, Event, Reject] {
   def reject(r: Reject): IO[Reject, Nothing]
 }
 
+// TODO make this a module
+// TODO this state must be by ID! not global!
 class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   state: Ref[Option[State]],
   eventJournalOffsetStore: KeyValueStore[Key, Long],
@@ -37,15 +41,19 @@ class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
 
   type Offset = Long
 
-  override def read: RIO[KeyAndFold, State] = state.get.flatMap {
-    case Some(state) =>
-      IO.succeed(state)
-    case None =>
-      // read from database (I need the key) and run the events until that state to now
-      for {
-        stateReturned <- recover
-        _             <- state.set(Some(stateReturned))
-      } yield stateReturned
+  override def read: RIO[KeyAndFold, State] = {
+
+    val result = state.get.flatMap {
+      case Some(state) =>
+        IO.succeed(state)
+      case None =>
+        // read from database (I need the key) and run the events until that state to now
+        for {
+          stateReturned <- recover
+          _             <- state.set(Some(stateReturned))
+        } yield stateReturned
+    }
+    result
   }
 
   override def append(es: Event, other: Event*): RIO[KeyAndFold, Unit] = {
