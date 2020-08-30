@@ -31,9 +31,6 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
   private val keyString: String =
     URLDecoder.decode(self.path.name, StandardCharsets.UTF_8.name())
 
-  // TODO set algebra combinator in order to avoid to instantiate on every command
-  private val state = Ref.make[Option[State]](None)
-
   private val key: Key = KeyDecoder[Key]
     .decode(keyString)
     .getOrElse {
@@ -42,6 +39,30 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       throw new IllegalArgumentException(error)
     }
 
+  private val algebraCombinators = Ref
+    .make[Option[State]](None)
+    .map { state =>
+      val combinators = new KeyedAlgebraCombinators[Key, State, Event, Reject](
+        key,
+        state,
+        eventsourcedBehavior.eventHandler,
+        algebraCombinatorConfig
+      )
+      new AlgebraCombinators[State, Event, Reject] {
+        override def read: Task[State] = combinators.read
+
+        override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
+
+        override def ignore: Task[Unit] = combinators.ignore
+
+        override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
+      }
+    }
+
+  private val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {
+    ZLayer.fromEffect(algebraCombinators)
+  }
+
   override def receive: Receive = {
     case Start =>
       unstashAll()
@@ -49,36 +70,9 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
     case _ => stash()
   }
 
-
   // here key is available, so at this level we can store the state of the algebra
   private def onActions: Receive = {
     case CommandInvocation(bytes) =>
-      // use macro to do this
-      val algebraCombinators = state
-        .map(
-          state =>
-            new KeyedAlgebraCombinators[Key, State, Event, Reject](
-              key,
-              state,
-              eventsourcedBehavior.eventHandler,
-              algebraCombinatorConfig
-            )
-        )
-
-      val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {
-        ZLayer.fromEffect(algebraCombinators.map { combinators =>
-          new AlgebraCombinators[State, Event, Reject] {
-            override def read: Task[State] = combinators.read
-
-            override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
-
-            override def ignore: Task[Unit] = combinators.ignore
-
-            override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
-          }
-        })
-      }
-
       //macro creates a map of functions of path -> Invocation
       val invocation: Invocation[State, Event, Reject] =
         protocol.server(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
@@ -88,12 +82,11 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
           invocation
             .call(bytes)
             .provideLayer(algebraCombinatorsWithKeyResolved)
-            .mapError {
-              reject =>
-                val decodingError = new IllegalArgumentException(s"Reject error ${reject}")
-                log.error(decodingError, "Failed to decode invocation")
-                sender() ! Status.Failure(decodingError)
-                decodingError
+            .mapError { reject =>
+              val decodingError = new IllegalArgumentException(s"Reject error ${reject}")
+              log.error(decodingError, "Failed to decode invocation")
+              sender() ! Status.Failure(decodingError)
+              decodingError
             }
         )
         .map(replyBytes => CommandResult(replyBytes))(context.dispatcher)

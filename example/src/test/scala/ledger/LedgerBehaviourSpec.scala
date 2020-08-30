@@ -24,16 +24,18 @@ class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTrip
       EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
     "should be easy to test the entity not using actorsystem" in {
       // when a command happens, events are triggered and state updated
-        (for {
+      println("Implementation start " +Instant.now())
+      (for {
           ledgers <- memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](Const(EventTag("testKey")), ledgerBehaviour).mapError(_ => "Error")
-          _ = println("Implementation start " +Instant.now())
+          _ = println("Stemtity configured " + Instant.now() )
           result <- ledgers("key").lock(BigDecimal(10), "test1")
-          result2 <- ledgers("key2").lock(BigDecimal(10), "test1")
-          result3 <- ledgers("key2").lock(BigDecimal(10), "testa1")
-          result4 <- ledgers("key2").lock(BigDecimal(10), "tesat1")
-          result5 <- ledgers("key3").lock(BigDecimal(10), "test1")
+          _ <- ledgers("key2").lock(BigDecimal(10), "test1")
+          _ <- ledgers("key2").lock(BigDecimal(10), "testa1")
+          _ <- ledgers("key2").lock(BigDecimal(10), "tesat1")
+          _ <- ledgers("key3").lock(BigDecimal(10), "test1")
+          _ <- ledgers("key2").lock(BigDecimal(43), "otest")
         } yield result).runSync should ===(Allowed)
-      println("G " +Instant.now())
+      println("Implementation end " +Instant.now())
     }
 
     "should be easy to test the entity using actorsystem" in {
