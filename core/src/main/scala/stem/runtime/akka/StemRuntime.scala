@@ -10,9 +10,8 @@ import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
-import stem.runtime.LiveBaseAlgebraCombinators.memory
 import stem.runtime.akka.serialization.Message
-import stem.runtime.{BaseAlgebraCombinators, KeyValueStore}
+import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, KeyValueStore}
 import zio.{Has, IO, Runtime, ZEnv, ZIO}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -34,8 +33,13 @@ object StemRuntime {
       for {
         memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
         snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
-        combinators                   <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
-        algebra                        <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
+        combinators = AlgebraCombinatorConfig.memory[Key, State, Event](
+          memoryEventJournalOffsetStore,
+          tagging,
+          memoryEventJournal,
+          snapshotKeyValueStore
+        )
+        algebra <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
       } yield algebra
     }
   }
@@ -43,14 +47,14 @@ object StemRuntime {
   def buildStemtity[Key: KeyDecoder: KeyEncoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     typeName: String,
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
-    baseAlgebraCombinators: BaseAlgebraCombinators[Key, State, Event, Reject]
+    algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
   )(
     implicit runtime: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[ActorSystem] with Has[RuntimeSettings], Throwable, Key => Algebra] = ZIO.access { layer =>
     val system = layer.get[ActorSystem]
     val settings = layer.get[RuntimeSettings]
-    val props = StemActor.props[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, baseAlgebraCombinators)
+    val props = StemActor.props[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, algebraCombinatorConfig)
 
     val extractEntityId: ShardRegion.ExtractEntityId = {
       case KeyedCommand(entityId, c) =>

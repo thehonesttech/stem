@@ -9,7 +9,7 @@ import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import stem.data.{AlgebraCombinators, EventTag}
 import stem.data.Tagging.Const
-import stem.runtime.LiveBaseAlgebraCombinators
+import stem.runtime.KeyedAlgebraCombinators
 import stem.runtime.akka.EventSourcedBehaviour
 import stem.test.StemOps
 import stem.test.TestStemRuntime._

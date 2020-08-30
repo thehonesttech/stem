@@ -1,7 +1,5 @@
 package stem.runtime
 
-import java.time.Instant
-
 import izumi.reflect.Tag
 import stem.data.{Tagging, Versioned}
 import stem.journal.{EventJournal, MemoryEventJournal}
@@ -17,31 +15,66 @@ import zio.{Ref, _}
   * @tparam Event
   * @tparam Reject
   */
+// TODO: merge with AlgebraCombinator since they have same interface
 trait BaseAlgebraCombinators[Key, State, Event, Reject] {
-  type KeyAndFold = Has[Key] with Has[Fold[State, Event]]
 
-  def read: RIO[KeyAndFold, State]
+  def read: Task[State]
 
-  def append(es: Event, other: Event*): RIO[KeyAndFold, Unit]
+  def append(es: Event, other: Event*): Task[Unit]
 
   def ignore: Task[Unit] = Task.unit
 
   def reject(r: Reject): IO[Reject, Nothing]
 }
 
-// TODO make this a module
-// TODO this state must be by ID! not global!
-class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
-  state: Ref[Option[State]],
+case class AlgebraCombinatorConfig[Key: Tag, State: Tag, Event: Tag](
   eventJournalOffsetStore: KeyValueStore[Key, Long],
   tagging: Tagging[Key],
   eventJournal: EventJournal[Key, Event],
   snapshotting: Snapshotting[Key, State]
-) extends BaseAlgebraCombinators[Key, State, Event, Reject] {
+)
 
+object AlgebraCombinatorConfig {
+
+  def live[Key: Tag, State: Tag, Event: Tag] =
+    ZLayer.fromServices {
+      (
+        eventJournalOffsetStore: KeyValueStore[Key, Long],
+        tagging: Tagging[Key],
+        eventJournal: EventJournal[Key, Event],
+        snapshotting: Snapshotting[Key, State]
+      ) =>
+        AlgebraCombinatorConfig(eventJournalOffsetStore, tagging, eventJournal, snapshotting)
+    }
+
+  def memory[Key: Tag, State: Tag, Event: Tag](
+    memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
+    tagging: Tagging[Key],
+    memoryEventJournal: EventJournal[Key, Event],
+    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
+  ): AlgebraCombinatorConfig[Key, State, Event] = {
+    new AlgebraCombinatorConfig(
+      memoryEventJournalOffsetStore,
+      tagging,
+      memoryEventJournal,
+      Snapshotting.eachVersion(10, snapshotKeyValueStore)
+    )
+  }
+
+}
+
+// TODO make this a module
+// TODO this state must be by ID! not global!
+class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
+  key: Key,
+  state: Ref[Option[State]],
+  userBehaviour: Fold[State, Event],
+  algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
+) extends BaseAlgebraCombinators[Key, State, Event, Reject] {
+  import algebraCombinatorConfig._
   type Offset = Long
 
-  override def read: RIO[KeyAndFold, State] = {
+  override def read: Task[State] = {
 
     val result = state.get.flatMap {
       case Some(state) =>
@@ -56,63 +89,53 @@ class LiveBaseAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
     result
   }
 
-  override def append(es: Event, other: Event*): RIO[KeyAndFold, Unit] = {
-    ZIO.accessM { layer =>
-      val key = layer.get[Key]
-      val userBehaviour = layer.get[Fold[State, Event]]
-      //append event and store offset
-      // read the offset by key
-      for {
-        offset <- getOffset
-        events: NonEmptyChunk[Event] = NonEmptyChunk(es, other: _*)
-        currentState <- read
-        newState     <- userBehaviour.init(currentState).run(events)
-        _            <- state.set(Some(newState))
-        _            <- eventJournal.append(key, offset, events).provide(tagging)
-        _            <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState))
-        _            <- eventJournalOffsetStore.setValue(key, offset + events.size)
-      } yield ()
-    }
+  override def append(es: Event, other: Event*): Task[Unit] = {
+    //append event and store offset
+    // read the offset by key
+    for {
+      offset <- getOffset
+      events: NonEmptyChunk[Event] = NonEmptyChunk(es, other: _*)
+      currentState <- read
+      newState     <- userBehaviour.init(currentState).run(events)
+      _            <- state.set(Some(newState))
+      _            <- eventJournal.append(key, offset, events).provide(tagging)
+      _            <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState))
+      _            <- eventJournalOffsetStore.setValue(key, offset + events.size)
+    } yield ()
   }
 
   override def reject(r: Reject): IO[Reject, Nothing] = IO.fail(r)
 
-  private def getOffset: RIO[Has[Key], Offset] = ZIO.accessM { layer =>
-    eventJournalOffsetStore.getValue(layer.get[Key]).map(_.getOrElse(0L))
-  }
+  private def getOffset: Task[Offset] = eventJournalOffsetStore.getValue(key).map(_.getOrElse(0L))
 
-  private def recover: RIO[KeyAndFold, State] = {
-    ZIO.accessM { layer =>
-      val key = layer.get[Key]
-      val userBehaviour = layer.get[Fold[State, Event]]
-      snapshotting.load(key).flatMap { versionedStateMaybe =>
-        // if nothing there, get initial state
-        // I need current offset from offset store
-        val (offset, readStateFromSnapshot) =
-          versionedStateMaybe.fold(0L -> userBehaviour.initial)(versionedState => versionedState.version -> versionedState.value)
+  private def recover: Task[State] = {
+    snapshotting.load(key).flatMap { versionedStateMaybe =>
+      // if nothing there, get initial state
+      // I need current offset from offset store
+      val (offset, readStateFromSnapshot) =
+        versionedStateMaybe.fold(0L -> userBehaviour.initial)(versionedState => versionedState.version -> versionedState.value)
 
-        // read until the current offset
-        getOffset.flatMap {
-          case offsetValue if offsetValue > 0 =>
-            // read until offsetValue
-            val foldBehaviour = userBehaviour.init(readStateFromSnapshot)
-            eventJournal
-              .read(key, offset)
-              .foldWhileM(readStateFromSnapshot -> offset) { case (_, foldedOffset) => foldedOffset == offsetValue } {
-                case ((state, _), entityEvent) =>
-                  foldBehaviour
-                    .reduce(state, entityEvent.payload)
-                    .map { processedState =>
-                      processedState -> entityEvent.sequenceNr
-                    }
-              }
-              .map(_._1)
+      // read until the current offset
+      getOffset.flatMap {
+        case offsetValue if offsetValue > 0 =>
+          // read until offsetValue
+          val foldBehaviour = userBehaviour.init(readStateFromSnapshot)
+          eventJournal
+            .read(key, offset)
+            .foldWhileM(readStateFromSnapshot -> offset) { case (_, foldedOffset) => foldedOffset == offsetValue } {
+              case ((state, _), entityEvent) =>
+                foldBehaviour
+                  .reduce(state, entityEvent.payload)
+                  .map { processedState =>
+                    processedState -> entityEvent.sequenceNr
+                  }
+            }
+            .map(_._1)
 
-          case _ => Task.succeed(readStateFromSnapshot)
-
-        }
+        case _ => Task.succeed(readStateFromSnapshot)
 
       }
+
     }
   }
 
@@ -137,19 +160,16 @@ object KeyValueStore {
   }
 }
 
-object LiveBaseAlgebraCombinators {
-  def memory[Key: Tag, State: Tag, Event: Tag, Reject](
-    memoryEventJournal: EventJournal[Key, Event],
-    memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
-    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
-    tagging: Tagging[Key]
-  ): ZIO[Any, Nothing, LiveBaseAlgebraCombinators[Key, State, Event, Reject]] = {
-    for {
-      state <- Ref.make[Option[State]](None)
-      snapshotting = Snapshotting.eachVersion(10, snapshotKeyValueStore)
-    } yield new LiveBaseAlgebraCombinators(state, memoryEventJournalOffsetStore, tagging, memoryEventJournal, snapshotting)
-  }
-}
+//object AlgebraCombinatorConfig {
+//  def memory[Key: Tag, State: Tag, Event: Tag, Reject](
+//    memoryEventJournal: EventJournal[Key, Event],
+//    memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
+//    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
+//    tagging: Tagging[Key]
+//  ): AlgebraCombinatorConfig[Key, State, Event] =  {
+//    new AlgebraCombinatorConfig(memoryEventJournalOffsetStore, tagging, memoryEventJournal, Snapshotting.eachVersion(10, snapshotKeyValueStore))
+//  }
+//}
 
 // TODO: can the output be a Task or must it be a State?
 final case class Fold[State, Event](initial: State, reduce: (State, Event) => Task[State]) {

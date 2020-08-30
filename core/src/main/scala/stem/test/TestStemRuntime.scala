@@ -7,10 +7,9 @@ import stem.StemApp
 import stem.StemApp.SIO
 import stem.data.{AlgebraCombinators, StemProtocol, Tagging, Versioned}
 import stem.journal.MemoryEventJournal
-import stem.runtime.LiveBaseAlgebraCombinators.memory
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender, KeyDecoder, KeyEncoder}
-import stem.runtime.{BaseAlgebraCombinators, Fold, KeyValueStore}
-import zio.{Has, IO, Runtime, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
+import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, Fold, KeyValueStore, KeyedAlgebraCombinators}
+import zio.{Has, IO, Ref, Runtime, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration._
 
@@ -28,33 +27,50 @@ object TestStemRuntime {
       memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
       snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
-      combinators                   <- memory[Key, State, Event, Reject](memoryEventJournal, memoryEventJournalOffsetStore, snapshotKeyValueStore, tagging)
-    } yield buildTestStemtity(eventSourcedBehaviour, combinators)
+      baseAlgebraConfig = AlgebraCombinatorConfig.memory[Key, State, Event](
+        memoryEventJournalOffsetStore,
+        tagging,
+        memoryEventJournal,
+        snapshotKeyValueStore
+      )
+    } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
-    combinators: BaseAlgebraCombinators[Key, State, Event, Reject] //default combinator that tracks events and states
+    algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event] //default combinator that tracks events and states
   )(implicit protocol: StemProtocol[Algebra, State, Event, Reject]): Key => Algebra = {
     val errorHandler: Throwable => Reject = eventSourcedBehaviour.errorHandler
 
     KeyAlgebraSender.keyToAlgebra[Key, Algebra, State, Event, Reject](
       { (key: Key, bytes: BitVector) =>
         println(s"Calling with key $key")
-        val keyAndFold: ZLayer[Any, Nothing, Has[Key] with Has[Fold[State, Event]]] = ZLayer.succeed(key) ++ ZLayer.succeed(
-          eventSourcedBehaviour.eventHandler
-        )
-        val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
-          ZLayer.succeed(new AlgebraCombinators[State, Event, Reject] {
-            println(s"Building with Key $key")
-            override def read: Task[State] = combinators.read.provideLayer(keyAndFold)
+        val algebraCombinators = Ref
+          .make[Option[State]](None)
+          .map(
+            state =>
+              new KeyedAlgebraCombinators[Key, State, Event, Reject](
+                key,
+                state,
+                eventSourcedBehaviour.eventHandler,
+                algebraCombinatorConfig
+            )
+          )
 
-            override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*).provideLayer(keyAndFold)
+        val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {
+          ZLayer.fromEffect(algebraCombinators.map { combinators =>
+            new AlgebraCombinators[State, Event, Reject] {
+              println(s"Building with Key $key")
+              override def read: Task[State] = combinators.read
 
-            override def ignore: Task[Unit] = combinators.ignore
+              override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
 
-            override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
+              override def ignore: Task[Unit] = combinators.ignore
+
+              override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
+            }
           })
+        }
         val invocation = protocol.server(eventSourcedBehaviour.algebra, errorHandler)
         invocation
           .call(bytes)

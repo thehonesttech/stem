@@ -9,20 +9,20 @@ import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.data.StemProtocol
 import stem.data.{AlgebraCombinators, Invocation}
-import stem.runtime.{BaseAlgebraCombinators, Fold}
-import zio.{Has, Runtime, Task, ZEnv, ZIO, ZLayer}
+import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, Fold, KeyedAlgebraCombinators}
+import zio.{Has, Ref, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 object StemActor {
   def props[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
-    baseAlgebraCombinators: BaseAlgebraCombinators[Key, State, Event, Reject]
+    algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
   )(implicit runtime: Runtime[ZEnv], protocol: StemProtocol[Algebra, State, Event, Reject]): Props =
-    Props(new StemActor[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, baseAlgebraCombinators))
+    Props(new StemActor[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, algebraCombinatorConfig))
 }
 
 private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
   eventsourcedBehavior: EventSourcedBehaviour[Algebra, State, Event, Reject],
-  keyedAlgebraCombinators: BaseAlgebraCombinators[Key, State, Event, Reject]
+  algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
 )(implicit runtime: Runtime[ZEnv], protocol: StemProtocol[Algebra, State, Event, Reject])
     extends Actor
     with Stash
@@ -30,6 +30,8 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
 
   private val keyString: String =
     URLDecoder.decode(self.path.name, StandardCharsets.UTF_8.name())
+
+  private val state = Ref.make[Option[State]](None)
 
   private val key: Key = KeyDecoder[Key]
     .decode(keyString)
@@ -51,21 +53,32 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
   private def onActions: Receive = {
     case CommandInvocation(bytes) =>
       // use macro to do this
-      val keyAndFold: ZLayer[Any, Nothing, Has[Key] with Has[Fold[State, Event]]] = ZLayer.succeed(key) ++ ZLayer.succeed(
-          eventsourcedBehavior.eventHandler
+      val algebraCombinators = state
+        .map(
+          state =>
+            new KeyedAlgebraCombinators[Key, State, Event, Reject](
+              key,
+              state,
+              eventsourcedBehavior.eventHandler,
+              algebraCombinatorConfig
+            )
         )
-      val algebraCombinatorsWithKeyResolved = ZLayer.succeed(new AlgebraCombinators[State, Event, Reject] {
-        override def read: Task[State] = keyedAlgebraCombinators.read.provideLayer(keyAndFold)
 
-        override def append(es: Event, other: Event*): Task[Unit] = keyedAlgebraCombinators.append(es, other: _*).provideLayer(keyAndFold)
+      val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {
+        ZLayer.fromEffect(algebraCombinators.map { combinators =>
+          new AlgebraCombinators[State, Event, Reject] {
+            override def read: Task[State] = combinators.read
 
-        override def ignore: Task[Unit] = keyedAlgebraCombinators.ignore
+            override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
 
-        override def reject[A](r: Reject): REJIO[A] = keyedAlgebraCombinators.reject(r)
-      })
+            override def ignore: Task[Unit] = combinators.ignore
+
+            override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
+          }
+        })
+      }
 
       //macro creates a map of functions of path -> Invocation
-//      val invocation: Invocation[State, Event, Reject] = RpcMacro.server[Algebra, State, Event, Reject](eventsourcedBehavior.algebra)
       val invocation: Invocation[State, Event, Reject] =
         protocol.server(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
 
