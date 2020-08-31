@@ -26,7 +26,6 @@ lazy val `core` = stemModule("core", "Core framework")
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
-lazy val `test` = stemModule("test", "Test Helpers").settings(libraryDependencies ++= zioTestDeps).dependsOn(`core`, `macros`, `readside`)
 lazy val `readside` =
   stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
@@ -57,10 +56,6 @@ val testDeps = Seq(
   "dev.zio" %% "zio-test-sbt" % "1.0.0" % Test
 )
 
-val zioTestDeps = Seq(
-  "dev.zio" %% "zio-test" % "1.0.0",
-  "dev.zio" %% "zio-test-sbt" % "1.0.0"
-)
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",

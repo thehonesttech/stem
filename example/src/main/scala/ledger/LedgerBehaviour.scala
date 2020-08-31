@@ -80,9 +80,7 @@ object LedgerEntity {
       import ops._
       (for {
         _ <- Task.unit
-        //        _ = println("Impl3 " +Instant.now())
         state <- read
-        //        _ = println("Impl4 " +Instant.now())
         _ <- append(AmountLocked(amount = Some(toLedgerBigDecimal(amount)), idempotencyKey = idempotencyKey))
       } yield Allowed).mapError(errorHandler)
     }

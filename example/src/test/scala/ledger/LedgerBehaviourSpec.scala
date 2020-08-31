@@ -13,6 +13,9 @@ import stem.runtime.akka.EventSourcedBehaviour
 import stem.test.StemOps
 import stem.test.TestStemRuntime._
 import zio.duration._
+import zio.test.Assertion.equalTo
+import zio.test._
+import zio.test.AssertionM._
 import zio.test.environment.TestClock
 
 class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTripleEquals with StemOps {
@@ -22,27 +25,24 @@ class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTrip
       EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
     "should be easy to test the entity not using actorsystem" in {
       // when a command happens, events are triggered and state updated
-      println("Implementation start " + Instant.now())
-      val (result, events) = (for {
+      val (result, events, stateInitial, stateAfter, events2) = (for {
         ledgerWithProbe <- memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](Const(EventTag("testKey")), ledgerBehaviour)
-          .mapError(_ => "Error")
         LedgerWithProbe(ledgers, probe) = ledgerWithProbe
-        _ = println("Stemtity configured " + Instant.now())
-
         result <- ledgers("key").lock(BigDecimal(10), "test1")
         _      <- TestClock.adjust(1.seconds)
-        events <- probe("key").getEvents.mapError(_ => "error")
-//        _ <- ledgers("key2").lock(BigDecimal(10), "test1")
-//        _ <- ledgers("key2").lock(BigDecimal(10), "testa1")
-//        _ <- ledgers("key2").lock(BigDecimal(10), "tesat1")
-//        _ <- ledgers("key3").lock(BigDecimal(10), "test1")
-//        _ <- ledgers("key2").lock(BigDecimal(43), "otest")
-      } yield result -> events).provideLayer(testLayer[Int, LedgerEvent, String]).runSync
+        events <- probe("key").getEvents
+        stateInitial <- probe("key").getState
+        _ <- ledgers("key").lock(BigDecimal(10), "test1")
+        events2 <- probe("key").getEvents
+        stateAfter <- probe("key").getState
+      } yield (result,events, stateInitial, stateAfter, events2)).provideLayer(testLayer[Int, LedgerEvent, String]).runSync
 
       result should ===(Allowed)
       events should have size 1
+      stateInitial should ===(1)
+      stateAfter should ===(2)
+      events2 should have size 2
 
-      println("Implementation end " + Instant.now())
     }
 
     "should be easy to test the entity using actorsystem" in {
