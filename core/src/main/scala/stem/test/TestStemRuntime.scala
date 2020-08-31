@@ -123,28 +123,6 @@ trait StemOps {
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
     zio.test.environment.testEnvironment ++ StemApp.liveAlgebraLayer[State, Event, Reject]
 
-  implicit def autoProvideLiveCombinator[State: Tag, Event: Tag, Reject: Tag, Result](
-    zio: ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]
-  ): ZIO[ZEnv, Reject, Result] =
-    zio.provideCustomLayer(StemApp.liveAlgebraLayer[State, Event, Reject])
-
-  //  implicit def toGenericCombinators[State, Event, Reject: Tag](comb: Combinators[State, Event, Reject]): Combinators[Nothing, Any, Reject] =
-//    Has(StemApp.liveAlgebra[Reject])
-
-//  implicit class RichSIO[-R, State: Tag, Event: Tag, Reject: Tag, Result](returnType: ZIO[R, Reject, Result])(
-//    implicit ev1: Combinators[State, Event, Reject] with TestClock <:< R
-//  ) {
-//    // I need the key here
-//
-//    def toIO: IO[Reject, Result] = {
-//      returnType.provideLayer(testLayer[State, Event, Reject])
-//    }
-//
-//    def runSync(implicit runtime: Runtime[ZEnv]): Result = {
-//      runtime.unsafeRun(returnType.provideLayer(testLayer[State, Event, Reject]))
-//    }
-//  }
-
   implicit class RichZIO[Reject, Result](returnType: ZIO[Any, Reject, Result]) {
     // I need the key here
 
@@ -153,10 +131,9 @@ trait StemOps {
     }
   }
 
-
-  implicit class RichUnsafeZIO[Reject: Tag, Result](returnType: ZIO[Nothing, Reject, Result]) {
-    def unsafeRunSync[State: Tag, Event: Tag](implicit runtime: Runtime[ZEnv]): Result = {
-      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State,Event,Reject]))
+  implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
+    def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {
+      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State, Event, Reject]))
     }
   }
 }
