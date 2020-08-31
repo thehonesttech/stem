@@ -54,10 +54,10 @@ object LedgerServer extends ServerMain {
       )
     )
 
-  private val entity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
-  private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and entity and liveAlgebra to InboundMessageHandling.live
-  private val readSideProcessing = (ZEnv.live and (actorSystem to ReadSideProcessor.readSideProcessing) and committableJournalQueryStore and entity) to ReadSideProcessor.live
-  private val ledgerService = entity and liveAlgebra to LedgerGrpcService.live
+  private val ledgerEntity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
+  private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity and liveAlgebra to InboundMessageHandling.live
+  private val readSideProcessing = (ZEnv.live and actorSystem and committableJournalQueryStore and ledgerEntity) to ReadSideProcessor.live
+  private val ledgerService = ledgerEntity and liveAlgebra to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
     ledgerService and kafkaMessageHandling and readSideProcessing
@@ -127,13 +127,7 @@ object LedgerEntity {
 
 object ReadSideProcessor {
 
-  import stem.readside.ReadSideProcessing
-
   implicit val runtime: Runtime[ZEnv] = LedgerServer
-
-  val readSideProcessing = ZLayer.fromService { (actorSystem: ActorSystem) =>
-    ReadSideProcessing(actorSystem)
-  }
 
   val live = ZLayer.fromEffect {
     ZIO.accessM { ledgers: Has[Ledgers] =>
@@ -183,7 +177,7 @@ object InboundMessageHandling {
     ZLayer.fromEffect {
       ZIO.accessM { layers: Has[ConsumerConfiguration] =>
         val kafkaConsumerConfiguration = layers.get[ConsumerConfiguration]
-        messageHandling.flatMap(handling => KafkaConsumer(kafkaConsumerConfiguration).subscribe(handling))
+        messageHandling.flatMap(KafkaConsumer(kafkaConsumerConfiguration).subscribe)
       }
     }
   }

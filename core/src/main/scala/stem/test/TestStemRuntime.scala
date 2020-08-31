@@ -37,13 +37,13 @@ object TestStemRuntime {
       LedgerWithProbe(
         buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig), { key: Key =>
           new Probe[State, Event] {
-            def getState: Task[State] = getEvents.flatMap(list => eventSourcedBehaviour.eventHandler.run(Chunk.fromIterable(list)))
+            val state: Task[State] = events.flatMap(list => eventSourcedBehaviour.eventHandler.run(Chunk.fromIterable(list)))
 
-            def getEvents: Task[List[Event]] = memoryEventJournal.getAppendedEvent(key)
+            def events: Task[List[Event]] = memoryEventJournal.getAppendedEvent(key)
 
             def eventStream: ZStream[Any, Throwable, Event] = memoryEventJournal.getAppendedStream(key)
 
-            def getEventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+            def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
               memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
 
             def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
@@ -103,13 +103,13 @@ object TestStemRuntime {
 
 trait Probe[State, Event] {
 
-  def getState: Task[State]
+  def state: Task[State]
 
-  def getEvents: Task[List[Event]]
+  def events: Task[List[Event]]
 
   def eventStream: ZStream[Any, Throwable, Event]
 
-  def getEventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]]
+  def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]]
 
   def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
 }

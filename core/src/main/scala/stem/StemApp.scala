@@ -41,10 +41,10 @@ object StemApp {
     logic: (Id, Event) => Task[Unit]
   )(
     implicit runtime: Runtime[ZEnv]
-  ): ZIO[ZEnv with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  ): ZIO[ZEnv with Has[ActorSystem] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
     // use logic
     ZIO.accessM { layers =>
-      val readSideProcessing = layers.get[ReadSideProcessing]
+      val readSideProcessing = ReadSideProcessing(layers.get[ActorSystem])
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
       val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
         journal.eventsByTag(tag, consumerId)
