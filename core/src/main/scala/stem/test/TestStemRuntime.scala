@@ -1,20 +1,20 @@
 package stem.test
 
-import java.time.Instant
-
 import scodec.bits.BitVector
 import stem.StemApp
-import stem.StemApp.SIO
-import stem.data.{AlgebraCombinators, StemProtocol, Tagging, Versioned}
+import stem.data._
 import stem.journal.MemoryEventJournal
-import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender, KeyDecoder, KeyEncoder}
-import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, Fold, KeyValueStore, KeyedAlgebraCombinators}
-import zio.{Has, IO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
+import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
+import stem.runtime.{AlgebraCombinatorConfig, KeyValueStore, KeyedAlgebraCombinators}
+import zio.clock.Clock
+import zio.stream.ZStream
+import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration._
 
-// macro to have methods that return IO instead of SIO? or implicit class that provide the missing layer
 object TestStemRuntime {
+
+  case class LedgerWithProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: Key => Probe[State, Event])
 
   def memoryStemtity[Key: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
@@ -22,7 +22,7 @@ object TestStemRuntime {
   )(
     implicit runtime: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
-  ): ZIO[Any, Throwable, Key => Algebra] = {
+  ): ZIO[Any, Throwable, LedgerWithProbe[Key, Algebra, State, Event]] = {
     for {
       memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
@@ -33,7 +33,24 @@ object TestStemRuntime {
         memoryEventJournal,
         snapshotKeyValueStore
       )
-    } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
+    } yield
+      LedgerWithProbe(
+        buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig), { key: Key =>
+          new Probe[State, Event] {
+            def getState: Task[State] = getEvents.flatMap(list => eventSourcedBehaviour.eventHandler.run(Chunk.fromIterable(list)))
+
+            def getEvents: Task[List[Event]] = memoryEventJournal.getAppendedEvent(key)
+
+            def eventStream: ZStream[Any, Throwable, Event] = memoryEventJournal.getAppendedStream(key)
+
+            def getEventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+              memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
+
+            def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
+              memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
+          }
+        }
+      )
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
@@ -53,29 +70,19 @@ object TestStemRuntime {
             case None =>
               Ref
                 .make[Option[State]](None)
-                .map {
-                  state =>
-                    val combinators = new KeyedAlgebraCombinators[Key, State, Event, Reject](
-                      key,
-                      state,
-                      eventSourcedBehaviour.eventHandler,
-                      algebraCombinatorConfig
-                    )
-                    new AlgebraCombinators[State, Event, Reject] {
-                      override def read: Task[State] = combinators.read
-
-                      override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
-
-                      override def ignore: Task[Unit] = combinators.ignore
-
-                      override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
-                    }
+                .map { state =>
+                  new KeyedAlgebraCombinators[Key, State, Event, Reject](
+                    key,
+                    state,
+                    eventSourcedBehaviour.eventHandler,
+                    algebraCombinatorConfig
+                  )
                 }
                 .flatMap { combinator =>
                   val uioCombinator = UIO.succeed(combinator)
-                   uioCombinator <* ZIO.effectTotal{
-                     combinatorMap = combinatorMap + (key -> uioCombinator)
-                   }
+                  uioCombinator <* ZIO.effectTotal {
+                    combinatorMap = combinatorMap + (key -> uioCombinator)
+                  }
                 }
           }
         } yield (combinatorRetrieved))
@@ -94,19 +101,49 @@ object TestStemRuntime {
   }
 }
 
+trait Probe[State, Event] {
+
+  def getState: Task[State]
+
+  def getEvents: Task[List[Event]]
+
+  def eventStream: ZStream[Any, Throwable, Event]
+
+  def getEventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]]
+
+  def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
+}
+
 trait StemOps {
   implicit val runtime: zio.Runtime[ZEnv] = zio.Runtime.default
 
-  implicit class RichSIO[State: Tag, Event: Tag, Reject: Tag, Result](returnType: SIO[State, Event, Reject, Result]) {
+//  val emptyAlgebra = StemApp.liveAlgebraLayer[State, Event, Reject]
+  def testLayer[State: Tag, Event: Tag, Reject: Tag]
+    : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
+    zio.test.environment.testEnvironment ++ StemApp.liveAlgebraLayer[State, Event, Reject]
+
+//  implicit def toGenericCombinators[State, Event, Reject: Tag](comb: Combinators[State, Event, Reject]): Combinators[Nothing, Any, Reject] =
+//    Has(StemApp.liveAlgebra[Reject])
+
+//  implicit class RichSIO[-R, State: Tag, Event: Tag, Reject: Tag, Result](returnType: ZIO[R, Reject, Result])(
+//    implicit ev1: Combinators[State, Event, Reject] with TestClock <:< R
+//  ) {
+//    // I need the key here
+//
+//    def toIO: IO[Reject, Result] = {
+//      returnType.provideLayer(testLayer[State, Event, Reject])
+//    }
+//
+//    def runSync(implicit runtime: Runtime[ZEnv]): Result = {
+//      runtime.unsafeRun(returnType.provideLayer(testLayer[State, Event, Reject]))
+//    }
+//  }
+
+  implicit class RichZIO[Reject, Result](returnType: ZIO[Any, Reject, Result]) {
     // I need the key here
 
-    def toIO: IO[Reject, Result] = {
-      returnType.provideLayer(StemApp.liveAlgebraLayer[State, Event, Reject])
-    }
-
     def runSync(implicit runtime: Runtime[ZEnv]): Result = {
-      val emptyAlgebra = StemApp.liveAlgebraLayer[State, Event, Reject]
-      runtime.unsafeRun(returnType.provideLayer(emptyAlgebra))
+      runtime.unsafeRun(returnType)
     }
   }
 

@@ -2,7 +2,7 @@ package stem.data
 
 import zio._
 
-trait AlgebraCombinators[State, Event, Reject] {
+trait AlgebraCombinators[+State, -Event, Reject] {
   type REJIO[Output] = IO[Reject, Output]
 
   def read: Task[State]

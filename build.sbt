@@ -22,12 +22,11 @@ def stemModule(id: String, description: String): Project =
     .settings(moduleName := id, name := description)
 
 lazy val `core` = stemModule("core", "Core framework")
-  .dependsOn(`data`)
-  .dependsOn(`readside`)
-  .dependsOn(`macros`)
+  .dependsOn(`data`, `readside`, `macros`)
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
+lazy val `test` = stemModule("test", "Test Helpers").settings(libraryDependencies ++= zioTestDeps).dependsOn(`core`, `macros`, `readside`)
 lazy val `readside` =
   stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
@@ -54,8 +53,13 @@ val testDeps = Seq(
   "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
   "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
   "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.0" % Test,
+  "dev.zio" %% "zio-test" % "1.0.0",
   "dev.zio" %% "zio-test-sbt" % "1.0.0" % Test
+)
+
+val zioTestDeps = Seq(
+  "dev.zio" %% "zio-test" % "1.0.0",
+  "dev.zio" %% "zio-test-sbt" % "1.0.0"
 )
 
 val allDeps = Seq(

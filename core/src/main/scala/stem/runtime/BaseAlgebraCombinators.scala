@@ -1,31 +1,12 @@
 package stem.runtime
 
 import izumi.reflect.Tag
-import stem.data.{Tagging, Versioned}
+import stem.data.{AlgebraCombinators, Tagging, Versioned}
 import stem.journal.{EventJournal, MemoryEventJournal}
 import stem.runtime.readside.JournalQuery
 import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import zio.{Ref, _}
 
-/**
-  * Algebra that depends on key (you can override this)
-  *
-  * @tparam Key
-  * @tparam State
-  * @tparam Event
-  * @tparam Reject
-  */
-// TODO: merge with AlgebraCombinator since they have same interface
-trait BaseAlgebraCombinators[Key, State, Event, Reject] {
-
-  def read: Task[State]
-
-  def append(es: Event, other: Event*): Task[Unit]
-
-  def ignore: Task[Unit] = Task.unit
-
-  def reject(r: Reject): IO[Reject, Nothing]
-}
 
 case class AlgebraCombinatorConfig[Key: Tag, State: Tag, Event: Tag](
   eventJournalOffsetStore: KeyValueStore[Key, Long],
@@ -69,7 +50,7 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   state: Ref[Option[State]],
   userBehaviour: Fold[State, Event],
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-) extends BaseAlgebraCombinators[Key, State, Event, Reject] {
+) extends AlgebraCombinators[State, Event, Reject] {
   import algebraCombinatorConfig._
   type Offset = Long
 
@@ -102,7 +83,7 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
     } yield ()
   }
 
-  override def reject(r: Reject): IO[Reject, Nothing] = IO.fail(r)
+  override def reject[A](r: Reject): IO[Reject, A] = IO.fail(r)
 
   private def getOffset: Task[Offset] = eventJournalOffsetStore.getValue(key).map(_.getOrElse(0L))
 
@@ -144,8 +125,9 @@ object EventJournalStore {
   def memory[Key: Tag, Event: Tag]: ZIO[Any, Nothing, EventJournal[Key, Event] with JournalQuery[Long, Key, Event]] = {
     import scala.concurrent.duration._
     for {
-      eventJournalInternal <- Ref.make[Map[Key, Chunk[(Long, Event, List[String])]]](Map.empty)
-    } yield new MemoryEventJournal[Key, Event](100.millis, eventJournalInternal)
+      internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
+      queue <- Queue.unbounded[(Key, Event)]
+    } yield new MemoryEventJournal[Key, Event](100.millis, internal, queue)
   }
 
 }

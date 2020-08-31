@@ -11,7 +11,7 @@ import scodec.bits.BitVector
 import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
 import stem.runtime.akka.serialization.Message
-import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, KeyValueStore}
+import stem.runtime.{AlgebraCombinatorConfig, KeyValueStore}
 import zio.{Has, IO, Runtime, ZEnv, ZIO}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}

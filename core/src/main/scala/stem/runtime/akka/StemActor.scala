@@ -9,7 +9,7 @@ import izumi.reflect.Tag
 import scodec.bits.BitVector
 import stem.data.StemProtocol
 import stem.data.{AlgebraCombinators, Invocation}
-import stem.runtime.{AlgebraCombinatorConfig, BaseAlgebraCombinators, Fold, KeyedAlgebraCombinators}
+import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyedAlgebraCombinators}
 import zio.{Has, Ref, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 object StemActor {
@@ -42,21 +42,12 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
   private val algebraCombinators = Ref
     .make[Option[State]](None)
     .map { state =>
-      val combinators = new KeyedAlgebraCombinators[Key, State, Event, Reject](
+      new KeyedAlgebraCombinators[Key, State, Event, Reject](
         key,
         state,
         eventsourcedBehavior.eventHandler,
         algebraCombinatorConfig
       )
-      new AlgebraCombinators[State, Event, Reject] {
-        override def read: Task[State] = combinators.read
-
-        override def append(es: Event, other: Event*): Task[Unit] = combinators.append(es, other: _*)
-
-        override def ignore: Task[Unit] = combinators.ignore
-
-        override def reject[A](r: Reject): REJIO[A] = combinators.reject(r)
-      }
     }
 
   private val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = {

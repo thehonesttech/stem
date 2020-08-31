@@ -1,5 +1,7 @@
 package stem.journal
 
+import java.time.Instant
+
 import stem.data.EventTag
 import stem.runtime.readside.JournalQuery
 import zio._
@@ -7,23 +9,50 @@ import zio.clock.Clock
 import zio.duration.Duration
 import zio.stream.ZStream
 
+import scala.collection.MapView
 import scala.concurrent.duration.FiniteDuration
 
+//TODO improve performance since they are not great
 class MemoryEventJournal[Key, Event](
-                                      pollingInterval: FiniteDuration,
-                                      internal: Ref[Map[Key, Chunk[(Long, Event, List[String])]]]
-                                    ) extends EventJournal[Key, Event]
-  with JournalQuery[Long, Key, Event] {
+  pollingInterval: FiniteDuration,
+  internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],
+  internalQueue: Queue[(Key, Event)]
+) extends EventJournal[Key, Event]
+    with JournalQuery[Long, Key, Event] {
+
+  def getAppendedEvent(key: Key): Task[List[Event]] = internalStateEvents.get.map { list =>
+    list.collect {
+      case (innerKey, offset, event, tags) if innerKey == key => event
+    }.toList
+  }
+
+  def getAppendedStream(key: Key): ZStream[Any, Nothing, Event] = ZStream.fromQueue(internalQueue).collect{
+    case (internalKey, event) if internalKey == key => event
+  }
+
+  private val internal = {
+    internalStateEvents.map { elements =>
+      elements
+        .groupBy { element =>
+          element._1
+        }
+        .view
+        .mapValues { chunk =>
+          chunk.map {
+            case (_, offset, event, tags) => (offset, event, tags)
+          }
+        }
+    }
+  }
+
   override def append(key: Key, offset: Long, events: NonEmptyChunk[Event]): RIO[HasTagging, Unit] =
     ZIO.accessM { tagging =>
-      internal.update { state: Map[Key, Chunk[(Long, Event, List[String])]] =>
+      internalStateEvents.update { internalEvents =>
         val tags = tagging.tag(key).map(_.value).toList
-        val oldValue: Chunk[(Long, Event, List[String])] = state.getOrElse(key, Chunk.empty)
-        val newValue: (Key, Chunk[(Long, Event, List[String])]) = key -> (oldValue ++ events.zipWithIndex.map {
-          case (event, index) => (index + offset, event, tags)
-        })
-        state + newValue
-      }
+        internalEvents ++ events.zipWithIndex.map {
+          case (event, index) => (key, index + offset, event, tags)
+        }
+      } *> internalQueue.offerAll(events.map(ev => key -> ev)).as(())
     }
 
   override def read(key: Key, offset: Long): stream.Stream[Nothing, EntityEvent[Key, Event]] = {
@@ -62,8 +91,10 @@ class MemoryEventJournal[Key, Event](
 
 object MemoryEventJournal {
   def make[Key, Event](pollingInterval: FiniteDuration): Task[MemoryEventJournal[Key, Event]] = {
-    Ref
-      .make(Map.empty[Key, Chunk[(Long, Event, List[String])]])
-      .map(internal => new MemoryEventJournal[Key, Event](pollingInterval, internal))
+    println(s"Starting building queue ${Instant.now()}")
+    for {
+      internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
+      queue <- Queue.unbounded[(Key, Event)]
+    } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue)
   }
 }
