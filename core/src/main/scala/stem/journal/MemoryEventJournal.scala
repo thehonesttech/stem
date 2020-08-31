@@ -91,7 +91,6 @@ class MemoryEventJournal[Key, Event](
 
 object MemoryEventJournal {
   def make[Key, Event](pollingInterval: FiniteDuration): Task[MemoryEventJournal[Key, Event]] = {
-    println(s"Starting building queue ${Instant.now()}")
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
       queue <- Queue.unbounded[(Key, Event)]

@@ -35,7 +35,7 @@ class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTrip
         _ <- ledgers("key").lock(BigDecimal(10), "test1")
         events2 <- probe("key").events
         stateAfter <- probe("key").state
-      } yield (result,events, stateInitial, stateAfter, events2)).provideLayer(testLayer[Int, LedgerEvent, String]).runSync
+      } yield (result,events, stateInitial, stateAfter, events2)).unsafeRunSync[Int, LedgerEvent]
 
       result should ===(Allowed)
       events should have size 1

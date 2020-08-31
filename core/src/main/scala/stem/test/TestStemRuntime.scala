@@ -2,6 +2,7 @@ package stem.test
 
 import scodec.bits.BitVector
 import stem.StemApp
+import stem.data.AlgebraCombinators.Combinators
 import stem.data._
 import stem.journal.MemoryEventJournal
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
@@ -122,7 +123,12 @@ trait StemOps {
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
     zio.test.environment.testEnvironment ++ StemApp.liveAlgebraLayer[State, Event, Reject]
 
-//  implicit def toGenericCombinators[State, Event, Reject: Tag](comb: Combinators[State, Event, Reject]): Combinators[Nothing, Any, Reject] =
+  implicit def autoProvideLiveCombinator[State: Tag, Event: Tag, Reject: Tag, Result](
+    zio: ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]
+  ): ZIO[ZEnv, Reject, Result] =
+    zio.provideCustomLayer(StemApp.liveAlgebraLayer[State, Event, Reject])
+
+  //  implicit def toGenericCombinators[State, Event, Reject: Tag](comb: Combinators[State, Event, Reject]): Combinators[Nothing, Any, Reject] =
 //    Has(StemApp.liveAlgebra[Reject])
 
 //  implicit class RichSIO[-R, State: Tag, Event: Tag, Reject: Tag, Result](returnType: ZIO[R, Reject, Result])(
@@ -147,4 +153,10 @@ trait StemOps {
     }
   }
 
+
+  implicit class RichUnsafeZIO[Reject: Tag, Result](returnType: ZIO[Nothing, Reject, Result]) {
+    def unsafeRunSync[State: Tag, Event: Tag](implicit runtime: Runtime[ZEnv]): Result = {
+      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State,Event,Reject]))
+    }
+  }
 }
