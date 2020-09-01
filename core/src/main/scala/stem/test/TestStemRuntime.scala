@@ -15,7 +15,7 @@ import scala.concurrent.duration._
 
 object TestStemRuntime {
 
-  case class LedgerWithProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: Key => Probe[State, Event])
+  case class StemtityAndProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: Key => Probe[State, Event])
 
   def memoryStemtity[Key: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
@@ -23,7 +23,7 @@ object TestStemRuntime {
   )(
     implicit runtime: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
-  ): ZIO[Any, Throwable, LedgerWithProbe[Key, Algebra, State, Event]] = {
+  ): ZIO[Any, Throwable, StemtityAndProbe[Key, Algebra, State, Event]] = {
     for {
       memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
@@ -35,7 +35,7 @@ object TestStemRuntime {
         snapshotKeyValueStore
       )
     } yield
-      LedgerWithProbe(
+      StemtityAndProbe(
         buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig), { key: Key =>
           new Probe[State, Event] {
             val state: Task[State] = events.flatMap(list => eventSourcedBehaviour.eventHandler.run(Chunk.fromIterable(list)))
@@ -137,3 +137,5 @@ trait StemOps {
     }
   }
 }
+
+object StemOps extends StemOps

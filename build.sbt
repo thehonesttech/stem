@@ -1,5 +1,3 @@
-import scalapb.compiler.Version.scalapbVersion
-
 val grpcVersion = "1.30.2"
 
 lazy val commonProtobufSettings = Seq(
@@ -14,7 +12,8 @@ lazy val commonProtobufSettings = Seq(
 
 lazy val commonSettings = Seq(
   scalacOptions += "-Xsource:2.13",
-  parallelExecution in Test := false
+  parallelExecution in Test := false,
+  zioTest
 )
 
 def stemModule(id: String, description: String): Project =
@@ -32,6 +31,7 @@ lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).se
 lazy val `example` = stemModule("example", "Ledger example")
   .dependsOn(`core`, `macros`, `readside`)
   .settings(libraryDependencies ++= testDeps)
+  .settings(zioTest)
   .settings(commonProtobufSettings)
 
 lazy val root = (project in file("."))
@@ -52,10 +52,10 @@ val testDeps = Seq(
   "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
   "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
   "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.0",
-  "dev.zio" %% "zio-test-sbt" % "1.0.0" % Test
+  "dev.zio" %% "zio-test" % "1.0.1",
+  "dev.zio" %% "zio-test-sbt" % "1.0.1" % Test,
+  "dev.zio" %% "zio-test-magnolia" % "1.0.1" % Test
 )
-
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",
@@ -77,3 +77,5 @@ val allDeps = Seq(
 ) ++ testDeps
 
 aggregateProjects(`core`, `example`, `data`, `readside`, `macros`)
+
+val zioTest = testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")

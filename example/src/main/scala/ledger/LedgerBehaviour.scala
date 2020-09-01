@@ -4,7 +4,8 @@ import java.time.Instant
 
 import akka.actor.ActorSystem
 import io.grpc.Status
-import ledger.LedgerEntity.{LedgerCommandHandler, tagging}
+import ledger.Converters._
+import ledger.LedgerEntity.{tagging, LedgerCommandHandler}
 import ledger.LedgerGrpcService.Ledgers
 import ledger.InboundMessageHandling.ConsumerConfiguration
 import ledger.communication.grpc.service.ZioService.ZLedger
@@ -79,9 +80,9 @@ object LedgerEntity {
       val ops = opsL.get
       import ops._
       (for {
-        _ <- Task.unit
+        _     <- Task.unit
         state <- read
-        _ <- append(AmountLocked(amount = Some(toLedgerBigDecimal(amount)), idempotencyKey = idempotencyKey))
+        _     <- append(AmountLocked(amount = toLedgerBigDecimal(amount), idempotencyKey = idempotencyKey))
       } yield Allowed).mapError(errorHandler)
     }
 
@@ -91,8 +92,6 @@ object LedgerEntity {
     @MethodId(3)
     def clear(transactionId: String, idempotencyKey: String): SIO[Unit] = ???
 
-    private def toLedgerBigDecimal(bigDecimal: BigDecimal): events.BigDecimal =
-      ledger.eventsourcing.events.events.BigDecimal(bigDecimal.scale, bigDecimal.precision)
   }
 
   val errorHandler: Throwable => String = error => error.getMessage
@@ -105,7 +104,7 @@ object LedgerEntity {
           case _: AmountLocked =>
             oldState + 1
           case _: LockReleased => 20
-          case _ => 30
+          case _               => 30
         }
         Task.succeed(newState)
     }
@@ -137,7 +136,6 @@ object ReadSideProcessor {
     }
   }
 
-
   final class LedgerProcessor(ledgers: Ledgers) {
     def process(key: String, ledgerEvent: LedgerEvent): Task[Unit] = {
       ???
@@ -145,7 +143,6 @@ object ReadSideProcessor {
   }
 
 }
-
 
 object InboundMessageHandling {
 
@@ -158,20 +155,20 @@ object InboundMessageHandling {
     ZIO.access { layers =>
       val ledgers = layers.get
       val combinator: LedgerCombinator = layers.get[LedgerCombinator]
-      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
-        instructionMessage match {
-          case Authorization(accountId, amount, idempotencyKey, _) =>
-            ledgers(accountId)
-              .lock(fromLedgerBigDecimal(amount), idempotencyKey)
-              .as()
-              .mapError(error => new Exception(s"$error happened"))
-          case _ => ZIO.unit
-        }
-      }.provideLayer(ZLayer.succeed(combinator))
+      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) =>
+        {
+          instructionMessage match {
+            case Authorization(accountId, amount, idempotencyKey, _) =>
+              ledgers(accountId)
+                .lock(fromLedgerBigDecimal(amount), idempotencyKey)
+                .as()
+                .mapError(error => new Exception(s"$error happened"))
+            case _ => ZIO.unit
+          }
+        }.provideLayer(ZLayer.succeed(combinator))
     }
 
-  val live
-  : ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[
+  val live: ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[
     Unit
   ]] = {
     ZLayer.fromEffect {

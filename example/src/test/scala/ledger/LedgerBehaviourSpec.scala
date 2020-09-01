@@ -1,7 +1,5 @@
 package ledger
 
-import java.time.Instant
-
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.eventsourcing.events.events.LedgerEvent
 import org.scalactic.TypeCheckedTripleEquals
@@ -20,22 +18,27 @@ import zio.test.environment.TestClock
 
 class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTripleEquals with StemOps {
 
-  "In a Stem Ledger behaviour" - {
-    val ledgerBehaviour =
+  def buildLedgerStemtity =
+    memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+      Const(EventTag("testKey")),
       EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
+    )
+
+  "In a Stem Ledger behaviour" - {
+
     "should be easy to test the entity not using actorsystem" in {
+
       // when a command happens, events are triggered and state updated
       val (result, events, stateInitial, stateAfter, events2) = (for {
-        ledgerWithProbe <- memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](Const(EventTag("testKey")), ledgerBehaviour)
-        LedgerWithProbe(ledgers, probe) = ledgerWithProbe
-        result <- ledgers("key").lock(BigDecimal(10), "test1")
-        _      <- TestClock.adjust(1.seconds)
-        events <- probe("key").events
-        stateInitial <- probe("key").state
-        _ <- ledgers("key").lock(BigDecimal(10), "test1")
-        events2 <- probe("key").events
-        stateAfter <- probe("key").state
-      } yield (result,events, stateInitial, stateAfter, events2)).runSync[Int, LedgerEvent, String]
+        StemtityAndProbe(ledgers, probe) <- buildLedgerStemtity
+        result                           <- ledgers("key").lock(BigDecimal(10), "test1")
+        _                                <- TestClock.adjust(1.seconds)
+        events                           <- probe("key").events
+        stateInitial                     <- probe("key").state
+        _                                <- ledgers("key").lock(BigDecimal(10), "test1")
+        events2                          <- probe("key").events
+        stateAfter                       <- probe("key").state
+      } yield (result, events, stateInitial, stateAfter, events2)).runSync[Int, LedgerEvent, String]
 
       result should ===(Allowed)
       events should have size 1
