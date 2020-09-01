@@ -88,13 +88,10 @@ object TestStemRuntime {
           }
         } yield (combinatorRetrieved))
 
-        val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
-          ZLayer.fromEffect(algebraCombinators)
-        val invocation = protocol.server(eventSourcedBehaviour.algebra, errorHandler)
-        invocation
+        protocol.server(eventSourcedBehaviour.algebra, errorHandler)
           .call(bytes)
           .map(CommandResult)
-          .provideLayer(algebraCombinatorsWithKeyResolved)
+          .provideLayer(algebraCombinators.toLayer)
       },
       errorHandler
     )(protocol)

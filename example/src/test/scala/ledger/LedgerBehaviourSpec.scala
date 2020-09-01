@@ -11,9 +11,6 @@ import stem.runtime.akka.EventSourcedBehaviour
 import stem.test.StemOps
 import stem.test.TestStemRuntime._
 import zio.duration._
-import zio.test.Assertion.equalTo
-import zio.test._
-import zio.test.AssertionM._
 import zio.test.environment.TestClock
 
 class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTripleEquals with StemOps {

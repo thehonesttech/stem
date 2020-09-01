@@ -140,16 +140,6 @@ object KeyValueStore {
   }
 }
 
-//object AlgebraCombinatorConfig {
-//  def memory[Key: Tag, State: Tag, Event: Tag, Reject](
-//    memoryEventJournal: EventJournal[Key, Event],
-//    memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
-//    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
-//    tagging: Tagging[Key]
-//  ): AlgebraCombinatorConfig[Key, State, Event] =  {
-//    new AlgebraCombinatorConfig(memoryEventJournalOffsetStore, tagging, memoryEventJournal, Snapshotting.eachVersion(10, snapshotKeyValueStore))
-//  }
-//}
 
 // TODO: can the output be a Task or must it be a State?
 final case class Fold[State, Event](initial: State, reduce: (State, Event) => Task[State]) {

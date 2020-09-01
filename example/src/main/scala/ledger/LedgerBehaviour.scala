@@ -115,26 +115,22 @@ object LedgerEntity {
 
   val tagging = Tagging.const(EventTag("Ledger"))
 
-  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] = ZLayer.fromEffect {
-    memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
-      "Ledger",
-      tagging,
-      EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
-    )
-  }
+  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] = memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+    "Ledger",
+    tagging,
+    EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
+  ).toLayer
 }
 
 object ReadSideProcessor {
 
   implicit val runtime: Runtime[ZEnv] = LedgerServer
 
-  val live = ZLayer.fromEffect {
-    ZIO.accessM { ledgers: Has[Ledgers] =>
-      val processor = new LedgerProcessor(ledgers.get)
-      val consumerId = ConsumerId("processing")
-      StemApp.readSide[String, LedgerEvent, Long]("LedgerReadSide", consumerId, tagging, processor.process)
-    }
-  }
+  val live = ZIO.accessM { ledgers: Has[Ledgers] =>
+    val processor = new LedgerProcessor(ledgers.get)
+    val consumerId = ConsumerId("processing")
+    StemApp.readSide[String, LedgerEvent, Long]("LedgerReadSide", consumerId, tagging, processor.process)
+  }.toLayer
 
   final class LedgerProcessor(ledgers: Ledgers) {
     def process(key: String, ledgerEvent: LedgerEvent): Task[Unit] = {
@@ -171,12 +167,10 @@ object InboundMessageHandling {
   val live: ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[
     Unit
   ]] = {
-    ZLayer.fromEffect {
-      ZIO.accessM { layers: Has[ConsumerConfiguration] =>
-        val kafkaConsumerConfiguration = layers.get[ConsumerConfiguration]
-        messageHandling.flatMap(KafkaConsumer(kafkaConsumerConfiguration).subscribe)
-      }
-    }
+    ZIO.accessM { layers: Has[ConsumerConfiguration] =>
+      val kafkaConsumerConfiguration = layers.get[ConsumerConfiguration]
+      messageHandling.flatMap(KafkaConsumer(kafkaConsumerConfiguration).subscribe)
+    }.toLayer
   }
 }
 
@@ -208,8 +202,7 @@ object LedgerGrpcService {
             reply <- ledgers(request.id)
               .lock(request.amount, request.idempotencyKey)
             _ <- putStrLn(reply.toString)
-          } yield LockReply().withMessage(reply.toString))
-            .mapError(_ => Status.NOT_FOUND)
+          } yield LockReply().withMessage(reply.toString)).orElseFail(Status.NOT_FOUND)
         }
 
         override def release(request: ReleaseRequest): ZIO[ZEnv with Combinators[Int, LedgerEvent, String], Status, ReleaseReply] =

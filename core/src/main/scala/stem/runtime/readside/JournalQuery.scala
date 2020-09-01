@@ -54,8 +54,7 @@ object JournalStores {
       memoryStore         <- EventJournalStore.memory[K, E]
       readSideOffsetStore <- KeyValueStore.memory[TagConsumer, Long]
     } yield (memoryStore: EventJournal[K, E], new CommittableJournalStore[Long, K, E](readSideOffsetStore, memoryStore): CommittableJournalQuery[Long, K, E])
-    ZLayer.fromEffect(res.map(_._1)) -> ZLayer.fromEffect(res.map(_._2))
-
+    res.map(_._1).toLayer -> res.map(_._2).toLayer
   }
 }
 
