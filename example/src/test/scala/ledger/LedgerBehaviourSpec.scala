@@ -22,9 +22,8 @@ class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTrip
     )
 
   "In a Stem Ledger behaviour" - {
-
+    import stem.StemApp.Ops._
     "should be easy to test the entity not using actorsystem" in {
-
       // when a command happens, events are triggered and state updated
       val (result, events, stateInitial, stateAfter, events2) = (for {
         StemtityAndProbe(ledgers, probe) <- buildLedgerStemtity

@@ -89,9 +89,12 @@ object StemApp {
     }
   }
 
-  implicit def clientCombinators[State, Event, Reject, Result](
-    from: ZIO[AlgebraCombinators[State, Event, Reject], Reject, Result]
-  ): IO[Reject, Result] =
-    from.provide(liveAlgebra)
+  object Ops {
 
+    implicit class StubbableSio[R <: zio.Has[_], State: Tag, Event: Tag, Reject: Tag, Result](
+      returnType: ZIO[R with Combinators[State, Event, Reject], Reject, Result]
+    ) {
+      def live: ZIO[R, Reject, Result] = returnType.provideSomeLayer[R](liveAlgebraLayer[State, Event, Reject])
+    }
+  }
 }
