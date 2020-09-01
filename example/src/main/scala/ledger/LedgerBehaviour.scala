@@ -115,11 +115,12 @@ object LedgerEntity {
 
   val tagging = Tagging.const(EventTag("Ledger"))
 
-  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] = memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
-    "Ledger",
-    tagging,
-    EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
-  ).toLayer
+  val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] =
+    memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+      "Ledger",
+      tagging,
+      EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
+    ).toLayer
 }
 
 object ReadSideProcessor {
@@ -143,7 +144,6 @@ object ReadSideProcessor {
 object InboundMessageHandling {
 
   import LedgerServer.LedgerCombinator
-  import ledger.LedgerGrpcService.Conversions._
 
   type ConsumerConfiguration = KafkaConsumerConfig[LedgerId, LedgerInstructionsMessage]
 
@@ -151,17 +151,16 @@ object InboundMessageHandling {
     ZIO.access { layers =>
       val ledgers = layers.get
       val combinator: LedgerCombinator = layers.get[LedgerCombinator]
-      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) =>
-        {
-          instructionMessage match {
-            case Authorization(accountId, amount, idempotencyKey, _) =>
-              ledgers(accountId)
-                .lock(fromLedgerBigDecimal(amount), idempotencyKey)
-                .as()
-                .mapError(error => new Exception(s"$error happened"))
-            case _ => ZIO.unit
-          }
-        }.provideLayer(ZLayer.succeed(combinator))
+      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
+        instructionMessage match {
+          case Authorization(accountId, amount, idempotencyKey, _) =>
+            ledgers(accountId)
+              .lock(fromLedgerBigDecimal(amount), idempotencyKey)
+              .as()
+              .mapError(error => new Exception(s"$error happened"))
+          case _ => ZIO.unit
+        }
+      }.provideLayer(ZLayer.succeed(combinator))
     }
 
   val live: ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerCombinator] with Has[ConsumerConfiguration], Throwable, Has[
@@ -177,24 +176,13 @@ object InboundMessageHandling {
 object LedgerGrpcService {
 
   import AlgebraTransformer.Ops._
-
+  import Converters.Ops._
   type Ledgers = String => LedgerCommandHandler
-
-  object Conversions {
-
-    implicit def toLedgerBigDecimal(bigDecimal: BigDecimal): events.BigDecimal =
-      ledger.eventsourcing.events.events.BigDecimal(bigDecimal.scale, bigDecimal.precision)
-
-    implicit def fromLedgerBigDecimal(bigDecimal: Option[events.BigDecimal]): BigDecimal = {
-      bigDecimal.map(el => BigDecimal.apply(el.scale, el.precision)).getOrElse(BigDecimal(0))
-    }
-  }
 
   val live =
     ZLayer.fromServices { (ledgers: Ledgers, algebra: AlgebraCombinators[Int, LedgerEvent, String]) =>
       new ZioService.ZLedger[ZEnv with Combinators[Int, LedgerEvent, String], Any] {
 
-        import Conversions._
         import zio.console._
 
         override def lock(request: LockRequest): ZIO[ZEnv with Combinators[Int, LedgerEvent, String], Status, LockReply] = {
