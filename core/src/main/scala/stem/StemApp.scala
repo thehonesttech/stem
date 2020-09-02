@@ -91,18 +91,21 @@ object StemApp {
 
   object Ops {
 
-//    implicit class StubbableSio[R <: zio.Has[_], State: Tag, Event: Tag, Reject: Tag, Result](
+//    implicit class StubbableSio[-R <: zio.Has[_], State: Tag, Event: Tag, Reject: Tag, Result](
 //      returnType: ZIO[R with Combinators[State, Event, Reject], Reject, Result]
 //    ) {
 //      def stubbedCombinator: ZIO[R, Reject, Result] = returnType.provideSomeLayer[R](stubCombinator[State, Event, Reject])
 //    }
 
-    implicit class StubbableSio[State: Tag, Event: Tag, Reject: Tag, Result](
+    implicit class StubbableSio[-R, State: Tag, Event: Tag, Reject: Tag, Result](
       returnType: ZIO[Combinators[State, Event, Reject], Reject, Result]
     ) {
       def provideCombinator: ZIO[Any, Reject, Result] = {
         returnType.provideLayer(stubCombinator[State, Event, Reject])
       }
+
+      def provideSomeCombinator[R0 <: Has[_]](implicit ev: R0 with Combinators[State, Event, Reject] <:< R) =
+        returnType.provideSomeLayer[R0](stubCombinator[State, Event, Reject])
     }
 
   }
