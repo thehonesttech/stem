@@ -5,6 +5,7 @@ import ledger.eventsourcing.events.events.LedgerEvent
 import org.scalactic.TypeCheckedTripleEquals
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
+import stem.StemApp
 import stem.data.EventTag
 import stem.data.Tagging.Const
 import stem.runtime.akka.EventSourcedBehaviour
@@ -15,18 +16,19 @@ import zio.test.environment.TestClock
 
 class LedgerBehaviourSpec extends AnyFreeSpec with Matchers with TypeCheckedTripleEquals with StemOps {
 
-  def buildLedgerStemtity =
-    memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
-      Const(EventTag("testKey")),
-      EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
-    )
+  val ledgerStemtity = memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+    Const(EventTag("testKey")),
+    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
+  )
+
+  val ledgerGrpc = ledgerStemtity.map(_.algebra).toLayer and StemApp.stubCombinator[Int, LedgerEvent, String] to LedgerGrpcService.live
 
   "In a Stem Ledger behaviour" - {
     import stem.StemApp.Ops._
     "should be easy to test the entity not using actorsystem" in {
       // when a command happens, events are triggered and state updated
       val (result, events, stateInitial, stateAfter, events2) = (for {
-        StemtityAndProbe(ledgers, probe) <- buildLedgerStemtity
+        StemtityAndProbe(ledgers, probe) <- ledgerStemtity
         result                           <- ledgers("key").lock(BigDecimal(10), "test1")
         _                                <- TestClock.adjust(1.seconds)
         events                           <- probe("key").events

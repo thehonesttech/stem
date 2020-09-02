@@ -118,7 +118,7 @@ trait StemOps {
 //  val emptyAlgebra = StemApp.liveAlgebraLayer[State, Event, Reject]
   def testLayer[State: Tag, Event: Tag, Reject: Tag]
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
-    zio.test.environment.testEnvironment ++ StemApp.liveAlgebraLayer[State, Event, Reject]
+    zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
 
   implicit class RichZIO[Reject, Result](returnType: ZIO[Any, Reject, Result]) {
     // I need the key here

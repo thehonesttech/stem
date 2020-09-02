@@ -26,7 +26,7 @@ object StemApp {
     override def reject[A](r: Reject): REJIO[A] = throw new RuntimeException("This is a stub")
   }
 
-  def liveAlgebraLayer[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
+  def stubCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
     ZLayer.succeed(liveAlgebra[Reject])
 
   def actorSystemLayer(name: String, confFileName: String = "stem.conf") =
@@ -91,10 +91,19 @@ object StemApp {
 
   object Ops {
 
-    implicit class StubbableSio[R <: zio.Has[_], State: Tag, Event: Tag, Reject: Tag, Result](
-      returnType: ZIO[R with Combinators[State, Event, Reject], Reject, Result]
+//    implicit class StubbableSio[R <: zio.Has[_], State: Tag, Event: Tag, Reject: Tag, Result](
+//      returnType: ZIO[R with Combinators[State, Event, Reject], Reject, Result]
+//    ) {
+//      def stubbedCombinator: ZIO[R, Reject, Result] = returnType.provideSomeLayer[R](stubCombinator[State, Event, Reject])
+//    }
+
+    implicit class StubbableSio[State: Tag, Event: Tag, Reject: Tag, Result](
+      returnType: ZIO[Combinators[State, Event, Reject], Reject, Result]
     ) {
-      def stubbedCombinator: ZIO[R, Reject, Result] = returnType.provideSomeLayer[R](liveAlgebraLayer[State, Event, Reject])
+      def provideCombinator: ZIO[Any, Reject, Result] = {
+        returnType.provideLayer(stubCombinator[State, Event, Reject])
+      }
     }
+
   }
 }
