@@ -15,8 +15,8 @@ object LedgerRpcMacro {
   implicit val ledgerProtocol: StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] =
     new StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] {
       private val mainCodec = codec[(Int, BitVector)]
-      val client: (BitVector => IO[String, BitVector], Throwable => String) => LedgerCommandHandler =
-        (commFn: BitVector => IO[String, BitVector], errorHandler: Throwable => String) =>
+      val client: (BitVector => Task[BitVector], Throwable => String) => LedgerCommandHandler =
+        (commFn: BitVector => Task[BitVector], errorHandler: Throwable => String) =>
           new LedgerCommandHandler {
             override def lock(amount: BigDecimal, idempotencyKey: String): SIO[LockResponse] = {
               ZIO.accessM { _: Has[AlgebraCombinators[Int, LedgerEvent, String]] =>
@@ -28,16 +28,17 @@ object LedgerRpcMacro {
                 // LockReply.validate()
 
                 val codecInput = codec[(BigDecimal, String)]
-                val codecResult = codec[LockResponse]
+                val codecResult = codec[Either[String, LockResponse]]
 
                 (for {
                   tupleEncoded <- IO.fromTry(codecInput.encode(tuple).toTry).mapError(errorHandler)
                   // start common code
-                  arguments <- IO.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
-                  vector <- commFn(arguments)
+                  arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
+                  vector <- commFn(arguments).mapError(errorHandler)
                   // end of common code
                   decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
-                } yield decoded)
+                  result <- ZIO.fromEither(decoded)
+                } yield result)
               }
 
             }
@@ -58,21 +59,21 @@ object LedgerRpcMacro {
         (algebra: LedgerCommandHandler, errorHandler: Throwable => String) =>
           new Invocation[Int, LedgerEvent, String] {
             val codecInput = codec[(BigDecimal, String)]
-            val codecResult = codec[LockResponse]
+            val codecResult = codec[Either[String, LockResponse]]
 
-            private def macroInvocation(arguments: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], String, BitVector] = {
+            private def macroInvocation(arguments: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], Throwable, BitVector] = {
               for {
-                input <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
-                result <- (algebra.lock _).tupled(input)
-                vector <- Task.fromTry(codecResult.encode(result).toTry).mapError(errorHandler)
+                input <- Task.fromTry(codecInput.decodeValue(arguments).toTry)
+                result <- (algebra.lock _).tupled(input).either
+                vector <- Task.fromTry(codecResult.encode(result).toTry)
               } yield vector
             }
 
-            override def call(message: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], String, BitVector] = {
+            override def call(message: BitVector): ZIO[Has[AlgebraCombinators[Int, LedgerEvent, String]], Throwable, BitVector] = {
               // for each method extract the name, it could be a sequence number for the method
               // according to the hint, extract the arguments
               for {
-                element <- Task.fromTry(mainCodec.decodeValue(message).toTry).mapError(errorHandler)
+                element <- Task.fromTry(mainCodec.decodeValue(message).toTry)
                 (hint, arguments) = element
                 //use extractedHint to decide what to do here
                 vector <- macroInvocation(arguments)

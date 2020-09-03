@@ -12,7 +12,7 @@ import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
 import stem.runtime.akka.serialization.Message
 import stem.runtime.{AlgebraCombinatorConfig, KeyValueStore}
-import zio.{Has, IO, Runtime, ZEnv, ZIO}
+import zio.{Has, IO, Runtime, Task, ZEnv, ZIO}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
@@ -86,7 +86,6 @@ object StemRuntime {
             implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
             shardRegion ? KeyedCommand(keyEncoder(key), bytes)
           }
-          .mapError(eventSourcedBehaviour.errorHandler)
       },
       eventSourcedBehaviour.errorHandler
     )
@@ -95,7 +94,7 @@ object StemRuntime {
 }
 
 object KeyAlgebraSender {
-  def keyToAlgebra[Key, Algebra, State, Event, Reject](senderFn: (Key, BitVector) => IO[Reject, Any], errorHandler: Throwable => Reject)(
+  def keyToAlgebra[Key, Algebra, State, Event, Reject](senderFn: (Key, BitVector) => Task[Any], errorHandler: Throwable => Reject)(
     implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ): Key => Algebra = { key: Key =>
     {
@@ -105,10 +104,10 @@ object KeyAlgebraSender {
           senderFn(key, bytes)
             .flatMap {
               case result: CommandResult =>
-                IO.succeed(result.bytes)
+                Task.succeed(result.bytes)
               case other =>
-                IO.fail(
-                  errorHandler(new IllegalArgumentException(s"Unexpected response [$other] from shard region"))
+                Task.fail(
+                  new IllegalArgumentException(s"Unexpected response [$other] from shard region")
                 )
             }
         },

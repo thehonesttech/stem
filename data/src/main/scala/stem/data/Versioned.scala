@@ -10,5 +10,5 @@ final case class Versioned[A](version: Long, value: A) {
 }
 
 trait Invocation[State, Event, Reject] {
-  def call(message: BitVector): ZIO[Has[AlgebraCombinators[State, Event, Reject]], Reject, BitVector]
+  def call(message: BitVector): ZIO[Has[AlgebraCombinators[State, Event, Reject]], Throwable, BitVector]
 }

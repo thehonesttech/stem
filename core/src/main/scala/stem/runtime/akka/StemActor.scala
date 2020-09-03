@@ -72,10 +72,9 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
             .call(bytes)
             .provideLayer(algebraCombinatorsWithKeyResolved)
             .mapError { reject =>
-              val decodingError = new IllegalArgumentException(s"Reject error $reject")
-              log.error(decodingError, "Failed to decode invocation")
-              sender() ! Status.Failure(decodingError)
-              decodingError
+              log.error("Failed to decode invocation", reject)
+              sender() ! Status.Failure(reject)
+              reject
             }
         )
         .map(replyBytes => CommandResult(replyBytes))(context.dispatcher)

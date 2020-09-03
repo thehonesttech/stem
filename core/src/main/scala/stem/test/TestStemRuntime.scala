@@ -89,8 +89,7 @@ object TestStemRuntime {
         } yield (combinatorRetrieved))
 
         protocol.server(eventSourcedBehaviour.algebra, errorHandler)
-          .call(bytes)
-          .map(CommandResult)
+          .call(bytes).map(CommandResult)
           .provideLayer(algebraCombinators.toLayer)
       },
       errorHandler

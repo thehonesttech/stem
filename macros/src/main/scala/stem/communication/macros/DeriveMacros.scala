@@ -95,7 +95,7 @@ class DeriveMacros(val c: blackbox.Context) {
                        val hint = $hintToUse
 
                        val codecInput = codec[$TupleNCons[..$paramTypes]]
-                       val codecResult = codec[$out]
+                       val codecResult = codec[Either[$reject, $out]]
                        val tuple: $TupleNCons[..$paramTypes] = $TupleNConsTerm(..$args)
 
                        // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
@@ -103,11 +103,12 @@ class DeriveMacros(val c: blackbox.Context) {
                          tupleEncoded <- IO.fromTry(codecInput.encode(tuple).toTry).mapError(errorHandler)
 
                          // start common code
-                         arguments <- IO.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
-                         vector    <- commFn(arguments)
+                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
+                         vector    <- commFn(arguments).mapError(errorHandler)
                          // end of common code
                          decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
-                       } yield decoded)
+                         result <- ZIO.fromEither(decoded)
+                       } yield result)
                      }"""
         method.copy(body = newBody).definition
     }
@@ -147,26 +148,25 @@ class DeriveMacros(val c: blackbox.Context) {
 
               q"""
                val codecInput = codec[$TupleNCons[..$paramTypes]]
-               val codecResult = codec[$out]
+               val codecResult = codec[Either[$reject, $out]]
                """
             }
 
           def runImplementation =
             if (argList.isEmpty)
-              q"algebra.$name"
+              q"algebra.$name.either"
             else
-              q"algebra.$name(...$argList)"
+              q"algebra.$name(...$argList).either"
 
           val invocation =
             q"""
               ..$argsTerm
               for {
-                  args  <- Task.fromTry(codecInput.decodeValue(arguments).toTry).mapError(errorHandler)
+                  args  <- Task.fromTry(codecInput.decodeValue(arguments).toTry)
                   result <- $runImplementation
-                  vector <- Task.fromTry(codecResult.encode(result).toTry).mapError(errorHandler)
+                  vector <- Task.fromTry(codecResult.encode(result).toTry)
               } yield vector
               """
-
           q"""
              if (hint == $hintToUse)  { $invocation } else $acc"""
       }
@@ -181,20 +181,20 @@ class DeriveMacros(val c: blackbox.Context) {
             import stem.data.AlgebraCombinators
 
              private val mainCodec = codec[(String, BitVector)]
-             val client: (BitVector => IO[$reject, BitVector], Throwable => $reject) => $algebra =
-               (commFn: BitVector => IO[$reject, BitVector], errorHandler: Throwable => $reject) =>
+             val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
+               (commFn: BitVector => Task[BitVector], errorHandler: Throwable => $reject) =>
                  new $algebra { ..$stubbedMethods }
 
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =
                (algebra: $algebra, errorHandler: Throwable => $reject) =>
                  new Invocation[$state, $event, $reject] {
-                   private def buildVectorFromHint(hint: String, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = { $serverHintBitVectorFunction }
+                   private def buildVectorFromHint(hint: String, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], Throwable, BitVector] = { $serverHintBitVectorFunction }
 
-                   override def call(message: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], $reject, BitVector] = {
+                   override def call(message: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], Throwable, BitVector] = {
                      // for each method extract the name, it could be a sequence number for the method
                        // according to the hint, extract the arguments
                        for {
-                         element <- Task.fromTry(mainCodec.decodeValue(message).toTry).mapError(errorHandler)
+                         element <- Task.fromTry(mainCodec.decodeValue(message).toTry)
                          hint = element._1
                          arguments = element._2
                          //use extractedHint to decide what to do here
