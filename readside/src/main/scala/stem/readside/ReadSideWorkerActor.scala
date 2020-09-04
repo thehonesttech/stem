@@ -1,12 +1,12 @@
 package stem.readside
 
 import akka.actor.{Actor, ActorLogging, Props, Status}
-import stem.readside.ReadSideProcessing.RunningProcess
 import stem.readside.ReadSideWorkerActor.KeepRunning
 import stem.readside.serialization.Message
 import zio.{Runtime, Task, ZEnv}
-import ReadSideProcessing.Process
 import akka.pattern._
+import ReadSideProcessing._
+import stem.readside.ReadSideProcessing.RunningProcess
 
 object ReadSideWorkerActor {
   def props(processWithId: Int => Process, processName: String)(implicit runtime: Runtime[ZEnv]): Props =
@@ -45,7 +45,7 @@ final class ReadSideWorkerActor(
         case ProcessStarted(RunningProcess(watchTermination, terminate)) =>
           log.info("[{}] Process started {}", workerId, processName)
           killSwitch = Some(terminate)
-          runtime.unsafeRunToFuture(watchTermination.map(_ => ProcessTerminated)) pipeTo self
+          runtime.unsafeRunToFuture(watchTermination.as(ProcessTerminated)) pipeTo self
           context.become {
             case Status.Failure(e) =>
               log.error(e, "Process failed {}", processName)

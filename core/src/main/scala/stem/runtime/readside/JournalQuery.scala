@@ -1,7 +1,7 @@
 package stem.runtime.readside
 
 import stem.data._
-import stem.journal.{EventJournal, JournalEntry}
+import stem.journal.{EventJournal, JournalEntry, MemoryEventJournal}
 import stem.runtime.{EventJournalStore, KeyValueStore}
 import stem.snapshot.KeyValueStore
 import zio.clock.Clock
@@ -49,11 +49,11 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
 }
 
 object JournalStores {
-  def memoryJournalAndQueryStoreLayer[K: Tag, E: Tag]: (ZLayer[Any, Nothing, Has[EventJournal[K, E]]], ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, K, E]]]) = {
+  def memoryJournalAndQueryStoreLayer[K: Tag, E: Tag]: (ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]], ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, K, E]]]) = {
     val res = for {
       memoryStore         <- EventJournalStore.memory[K, E]
       readSideOffsetStore <- KeyValueStore.memory[TagConsumer, Long]
-    } yield (memoryStore: EventJournal[K, E], new CommittableJournalStore[Long, K, E](readSideOffsetStore, memoryStore): CommittableJournalQuery[Long, K, E])
+    } yield (memoryStore, new CommittableJournalStore[Long, K, E](readSideOffsetStore, memoryStore): CommittableJournalQuery[Long, K, E])
     res.map(_._1).toLayer -> res.map(_._2).toLayer
   }
 }

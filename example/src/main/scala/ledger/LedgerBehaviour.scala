@@ -3,7 +3,7 @@ package ledger
 import akka.actor.ActorSystem
 import io.grpc.Status
 import ledger.Converters._
-import ledger.LedgerEntity.{tagging, LedgerCommandHandler}
+import ledger.LedgerEntity.{LedgerCommandHandler, tagging}
 import ledger.LedgerGrpcService.Ledgers
 import ledger.InboundMessageHandling.ConsumerConfiguration
 import ledger.communication.grpc.service.ZioService.ZLedger
@@ -17,15 +17,16 @@ import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data._
 import stem.journal.EventJournal
+import stem.readside.{ReadSideProcessing, ReadSideSettings}
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
-import stem.runtime.readside.JournalStores
+import stem.runtime.readside.{CommittableJournalQuery, JournalStores}
 import stem.runtime.{AlgebraTransformer, Fold}
 import zio.blocking.Blocking
 import zio.clock.Clock
-import zio.console.Console
+import zio.console.{Console, putStrLn}
 import zio.kafka.consumer.ConsumerSettings
-import zio.{Has, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, RIO, Runtime, Task, ULayer, URIO, ZEnv, ZIO, ZLayer, console}
 
 sealed trait LockResponse
 
@@ -36,12 +37,14 @@ case class Denied(reason: String) extends LockResponse
 object LedgerServer extends ServerMain {
 
   import JournalStores._
+  import stem.test.ZIOOps._
 
   type LedgerCombinator = AlgebraCombinators[Int, LedgerEvent, String]
   private val actorSystem = StemApp.actorSystemLayer("System")
+  private val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
   private val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
-  private val (eventJournalStore, committableJournalQueryStore) = memoryJournalAndQueryStoreLayer[String, LedgerEvent]
-
+  private val (memoryEventJournalStore, committableJournalQueryStore) = memoryJournalAndQueryStoreLayer[String, LedgerEvent]
+  private val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[String, LedgerEvent]]] = memoryEventJournalStore.as[EventJournal[String, LedgerEvent]]
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
       KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
@@ -52,11 +55,12 @@ object LedgerServer extends ServerMain {
 
   private val ledgerEntity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity to InboundMessageHandling.liveLayer
-  private val readSideProcessing = (ZEnv.live and actorSystem and committableJournalQueryStore and ledgerEntity) to ReadSideProcessor.live
+  private val readSideProcessing = actorSystem and readSideSettings to ReadSideProcessing.live
+  private val readSideProcessor = (ZEnv.live and readSideProcessing and committableJournalQueryStore) to ReadSideProcessor.live
   private val ledgerService = ledgerEntity to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    ledgerService and kafkaMessageHandling and readSideProcessing
+    ledgerService and kafkaMessageHandling and readSideProcessor
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
@@ -105,15 +109,16 @@ object LedgerEntity {
     }
   )
 
-  val stemtity = memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
-    "Ledger",
-    tagging,
-    EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler))
-
   implicit val ledgerProtocol: StemProtocol[LedgerCommandHandler, Int, LedgerEvent, String] =
     RpcMacro.derive[LedgerCommandHandler, Int, LedgerEvent, String]
 
   val tagging = Tagging.const(EventTag("Ledger"))
+
+  val stemtity = memoryStemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+    "Ledger",
+    tagging,
+    EventSourcedBehaviour(new LedgerCommandHandler(), eventHandlerLogic, errorHandler)
+  )
 
   val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] = stemtity.toLayer
 }
@@ -122,18 +127,23 @@ object ReadSideProcessor {
 
   implicit val runtime: Runtime[ZEnv] = LedgerServer
 
-  val live = ZIO.accessM { ledgers: Has[Ledgers] =>
-    val processor = new LedgerProcessor(ledgers.get)
-    val consumerId = ConsumerId("processing")
-    StemApp.readSide[String, LedgerEvent, Long]("LedgerReadSide", consumerId, tagging, processor.process)
-  }.toLayer
-
-  final class LedgerProcessor(ledgers: Ledgers) {
-    def process(key: String, ledgerEvent: LedgerEvent): Task[Unit] = {
-      // for now just print console
-      ???
-    }
+  private val task: ZIO[Console, Nothing, (String, LedgerEvent) => Task[Unit]] = ZIO.access { layer =>
+    val console = layer.get
+    (key: String, event: LedgerEvent) => console.putStrLn(s"Arrived $key with event $event")
   }
+
+  val live
+    : ZLayer[Console with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[ReadSideProcessing.KillSwitch]] =
+    (for {
+      readSideLogic <- task
+      readSide <- StemApp
+        .readSide[String, LedgerEvent, Long](
+          "LedgerReadSide",
+          ConsumerId("processing"),
+          tagging,
+          readSideLogic
+        )
+    } yield readSide).toLayer
 
 }
 
@@ -146,18 +156,17 @@ object InboundMessageHandling {
   val messageHandling: ZIO[Has[Ledgers], Throwable, (LedgerId, LedgerInstructionsMessage) => Task[Unit]] =
     ZIO.access { layers =>
       val ledgers = layers.get
-      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) =>
-        {
-          instructionMessage match {
-            case Authorization(accountId, amount, idempotencyKey, _) =>
-              ledgers(accountId)
-                .lock(fromLedgerBigDecimal(amount), idempotencyKey)
-                .as()
-                .provideCombinator
-                .mapError(error => new Exception(s"$error happened"))
-            case _ => ZIO.unit
-          }
+      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
+        instructionMessage match {
+          case Authorization(accountId, amount, idempotencyKey, _) =>
+            ledgers(accountId)
+              .lock(fromLedgerBigDecimal(amount), idempotencyKey)
+              .as()
+              .provideCombinator
+              .mapError(error => new Exception(s"$error happened"))
+          case _ => ZIO.unit
         }
+      }
     }
 
   val subscription: ZIO[Clock with Blocking with Console with Has[Ledgers] with Has[ConsumerConfiguration], Throwable, Unit] = ZIO.accessM { layers =>
@@ -176,17 +185,16 @@ object LedgerGrpcService {
   import Converters.Ops._
   type Ledgers = String => LedgerCommandHandler
 
-  val service: ZIO[Has[Ledgers],Nothing,  ZioService.ZLedger[ZEnv, Any]] =  ZIO.access{ layer =>
+  val service: ZIO[Has[Ledgers], Nothing, ZioService.ZLedger[ZEnv, Any]] = ZIO.access { layer =>
     val ledgers = layer.get
     new ZioService.ZLedger[ZEnv, Any] {
-
-      import zio.console._
 
       override def lock(request: LockRequest): ZIO[ZEnv, Status, LockReply] = {
         (for {
           reply <- ledgers(request.id)
-            .lock(request.amount, request.idempotencyKey).provideCombinator
-          _ <- putStrLn(reply.toString)
+            .lock(request.amount, request.idempotencyKey)
+            .provideCombinator
+          _ <- console.putStrLn(reply.toString)
         } yield LockReply().withMessage(reply.toString)).orElseFail(Status.NOT_FOUND)
       }
 

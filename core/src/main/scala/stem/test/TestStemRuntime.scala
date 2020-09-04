@@ -4,9 +4,9 @@ import scodec.bits.BitVector
 import stem.StemApp
 import stem.data.AlgebraCombinators.Combinators
 import stem.data._
-import stem.journal.MemoryEventJournal
+import stem.journal.{EventJournal, MemoryEventJournal}
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
-import stem.runtime.{AlgebraCombinatorConfig, KeyValueStore, KeyedAlgebraCombinators}
+import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
 import zio.clock.Clock
 import zio.stream.ZStream
 import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
@@ -15,17 +15,18 @@ import scala.concurrent.duration._
 
 object TestStemRuntime {
 
-  case class StemtityAndProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: Key => Probe[State, Event])
+//  case class StemtityAndProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: StemtityProbe[Key, State, Event])
 
-  def memoryStemtity[Key: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
+  def stemtity[Key: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
   )(
     implicit runtime: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
-  ): ZIO[Any, Throwable, StemtityAndProbe[Key, Algebra, State, Event]] = {
+  ): ZIO[Has[MemoryEventJournal[Key, Event]], Throwable, Key => Algebra] = ZIO.accessM { layer =>
+    val memoryEventJournal = layer.get
     for {
-      memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
+//      memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
       snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
       baseAlgebraConfig = AlgebraCombinatorConfig.memory[Key, State, Event](
@@ -34,24 +35,7 @@ object TestStemRuntime {
         memoryEventJournal,
         snapshotKeyValueStore
       )
-    } yield
-      StemtityAndProbe(
-        buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig), { key: Key =>
-          new Probe[State, Event] {
-            val state: Task[State] = events.flatMap(list => eventSourcedBehaviour.eventHandler.run(Chunk.fromIterable(list)))
-
-            def events: Task[List[Event]] = memoryEventJournal.getAppendedEvent(key)
-
-            def eventStream: ZStream[Any, Throwable, Event] = memoryEventJournal.getAppendedStream(key)
-
-            def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
-              memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
-
-            def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
-              memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
-          }
-        }
-      )
+    } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
@@ -88,8 +72,10 @@ object TestStemRuntime {
           }
         } yield (combinatorRetrieved))
 
-        protocol.server(eventSourcedBehaviour.algebra, errorHandler)
-          .call(bytes).map(CommandResult)
+        protocol
+          .server(eventSourcedBehaviour.algebra, errorHandler)
+          .call(bytes)
+          .map(CommandResult)
           .provideLayer(algebraCombinators.toLayer)
       },
       errorHandler
@@ -98,23 +84,51 @@ object TestStemRuntime {
   }
 }
 
-trait Probe[State, Event] {
+object StemtityProbe {
 
-  def state: Task[State]
+  type StemtityProbe[Key, State, Event] = Has[StemtityProbe.Service[Key, State, Event]]
 
-  def events: Task[List[Event]]
+  case class KeyedProbeOperations[State, Event](
+    state: Task[State],
+    events: Task[List[Event]],
+    eventStream: ZStream[Any, Throwable, Event]
+  )
 
-  def eventStream: ZStream[Any, Throwable, Event]
+  trait Service[Key, State, Event] {
 
-  def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]]
+    def apply(key: Key): KeyedProbeOperations[State, Event]
 
-  def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
+    def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]]
+
+    def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
+  }
+
+  def live[Key: Tag, State: Tag, Event: Tag] = ZLayer.fromServices { (memoryEventJournal: MemoryEventJournal[Key, Event], eventHandler: Fold[State, Event]) =>
+    new Service[Key, State, Event] {
+
+      def apply(key: Key) = KeyedProbeOperations(
+        state = state(key),
+        events = events(key),
+        eventStream = eventStream(key)
+      )
+      private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
+      private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
+      private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
+
+      def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+        memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
+
+      def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
+        memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
+    }
+
+  }
+
 }
 
 trait StemOps {
   implicit val runtime: zio.Runtime[ZEnv] = zio.Runtime.default
 
-//  val emptyAlgebra = StemApp.liveAlgebraLayer[State, Event, Reject]
   def testLayer[State: Tag, Event: Tag, Reject: Tag]
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
     zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
@@ -135,3 +149,14 @@ trait StemOps {
 }
 
 object StemOps extends StemOps
+
+object ZIOOps {
+
+  implicit class ZLayerRich[-RIn: Tag, +E: Tag, +InnerROut: Tag](inner: ZLayer[RIn, E, Has[InnerROut]]) {
+    def as[T: Tag](implicit ev: InnerROut <:< T): ZLayer[RIn, E, Has[T]] = {
+      inner.map { layer =>
+        Has(layer.get.asInstanceOf[T])
+      }
+    }
+  }
+}

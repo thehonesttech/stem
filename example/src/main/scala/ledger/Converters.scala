@@ -4,13 +4,13 @@ import ledger.eventsourcing.events.events
 
 object Converters {
   private def toLedgerBigDecimalValue(bigDecimal: BigDecimal): events.BigDecimal =
-    ledger.eventsourcing.events.events.BigDecimal(bigDecimal.scale, bigDecimal.precision)
+    ledger.eventsourcing.events.events.BigDecimal(bigDecimal.longValue, bigDecimal.scale)
 
   def toLedgerBigDecimal(bigDecimal: BigDecimal): Option[events.BigDecimal] =
     Some(toLedgerBigDecimalValue(bigDecimal))
 
   def fromLedgerBigDecimal(bigDecimal: Option[events.BigDecimal]): BigDecimal = {
-    bigDecimal.map(el => BigDecimal.apply(el.scale, el.precision)).getOrElse(BigDecimal(0))
+    bigDecimal.map(el => BigDecimal(el.unscaledValue, el.scale)).getOrElse(BigDecimal(0))
   }
 
   object Ops {

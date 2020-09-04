@@ -122,7 +122,7 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
 
 object EventJournalStore {
 
-  def memory[Key: Tag, Event: Tag]: ZIO[Any, Nothing, EventJournal[Key, Event] with JournalQuery[Long, Key, Event]] = {
+  def memory[Key: Tag, Event: Tag]: ZIO[Any, Nothing, MemoryEventJournal[Key, Event]] = {
     import scala.concurrent.duration._
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())

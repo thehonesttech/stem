@@ -9,6 +9,7 @@ import stem.readside.ReadSideProcessing
 import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
 import stem.runtime.readside.CommittableJournalQuery
 import zio.clock.Clock
+import zio.console.Console
 import zio.stream.ZStream
 import zio.{Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
@@ -41,10 +42,10 @@ object StemApp {
     logic: (Id, Event) => Task[Unit]
   )(
     implicit runtime: Runtime[ZEnv]
-  ): ZIO[ZEnv with Has[ActorSystem] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  ): ZIO[Console with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
     // use logic
     ZIO.accessM { layers =>
-      val readSideProcessing = ReadSideProcessing(layers.get[ActorSystem])
+      val readSideProcessing = layers.get[ReadSideProcessing]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
       val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
         journal.eventsByTag(tag, consumerId)

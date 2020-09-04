@@ -10,7 +10,7 @@ import zio.duration.Duration
 import zio.stream.ZStream
 
 import scala.collection.MapView
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 //TODO improve performance since they are not great
 class MemoryEventJournal[Key, Event](

@@ -19,7 +19,7 @@ message LockReleased {
 }
 
 message BigDecimal {
-   uint64 scale = 1;
-   int32 precision = 2;
+   uint64 unscaledValue = 1;
+   int32 scale = 2;
 }
 
