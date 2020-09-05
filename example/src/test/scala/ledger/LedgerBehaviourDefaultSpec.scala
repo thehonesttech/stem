@@ -5,21 +5,18 @@ import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.communication.grpc.service.{LockReply, LockRequest, ZioService}
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent}
 import stem.StemApp
-import stem.data.EventTag
-import stem.data.Tagging.Const
-import stem.journal.MemoryEventJournal
 import stem.readside.ReadSideProcessing
 import stem.runtime.akka.EventSourcedBehaviour
 import stem.runtime.readside.JournalStores.memoryJournalAndQueryStoreLayer
-import stem.test.StemtityProbe.StemtityProbe
-import stem.test.{StemOps, StemtityProbe}
 import stem.test.TestStemRuntime._
-import zio.{Cause, Has, Task, URIO, ZEnv, ZIO, ZLayer}
+import stem.test.{StemOps, StemtityProbe}
+import zio.clock.Clock
+import zio.console.Console
+import zio.duration.durationInt
 import zio.test.Assertion.{equalTo, hasSameElements}
 import zio.test._
-import zio.console.Console
 import zio.test.environment.{TestClock, TestConsole}
-import zio.duration._
+import zio.{ZEnv, ZIO, ZLayer}
 
 object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
 
@@ -50,19 +47,22 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
         import Converters.Ops._
         //call grpc service, check events and state, advance time, read side view, send with kafka
         (for {
-          probe              <- ledgerProbe
-          service            <- ledgerGrpcService
-          lockReply          <- service.lock(LockRequest("key", "accountId1", BigDecimal(10), "idempotency1"))
-          stateInitial       <- probe("key").state
-          console            <- TestConsole.output
-          eventsFromReadSide <- probe.eventsFromReadSide(EventTag("testKey"))
-          _                  <- shutdownReadSide
+          probe        <- ledgerProbe
+          service      <- ledgerGrpcService
+          lockReply    <- service.lock(LockRequest("key", "accountId1", BigDecimal(10), "idempotency1"))
+          stateInitial <- probe("key").state
+          _            <- TestClock.adjust(100.millis)
+//          sleeps       <- TestClock.sleeps
+//          eventsFromReadSide <- probe.eventsFromReadSide(LedgerEntity.tagging.tag)
+          console <- TestConsole.output
+//          _       <- shutdownReadSide
+//          _ = println(sleeps)
         } yield {
           assert(lockReply)(equalTo(LockReply("Allowed"))) &&
           assert(stateInitial)(equalTo(1)) &&
-          assert(eventsFromReadSide)(equalTo(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "idempotency1")))) &&
+//          assert(eventsFromReadSide)(equalTo(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "idempotency1")))) &&
           assert(console)(equalTo(Vector("Allowed\n")))
-        }).provideLayer(zio.test.environment.testEnvironment ++ TestConsole.silent ++ probeLayer ++ grpcServiceLayer ++ readSideProcessorLayer)
+        }).provideLayer(zio.test.environment.testEnvironment ++ TestConsole.silent ++ TestClock.any ++ probeLayer ++ grpcServiceLayer ++ readSideProcessorLayer)
       }
     )
   )
@@ -73,12 +73,12 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
 
   private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
   private val (memoryEventJournalLayer, committableJournalQueryStore) = memoryJournalAndQueryStoreLayer[String, LedgerEvent]
-  private val readSideProcessorLayer = Console.any ++ committableJournalQueryStore ++ ReadSideProcessing.memory >>> ReadSideProcessor.live
+  private val readSideProcessorLayer = Console.any ++ Clock.any ++ committableJournalQueryStore ++ ReadSideProcessing.memory >>> ReadSideProcessor.live
 
 //  private val ledgerCombinator = testLayer[Int, LedgerEvent, String]
   private val ledgerCombinator = StemApp.stubCombinator[Int, LedgerEvent, String]
   private val stemtityLayer = (memoryEventJournalLayer >>> stemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
-    Const(EventTag("testKey")),
+    LedgerEntity.tagging,
     EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
   ).toLayer)
 

@@ -5,21 +5,18 @@ import java.nio.charset.StandardCharsets
 
 import akka.actor.ActorSystem
 import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
-import akka.pattern.{ask, BackoffOpts, BackoffSupervisor}
+import akka.pattern.{BackoffOpts, BackoffSupervisor, ask}
 import akka.util.Timeout
-import stem.readside.ReadSideProcessing.KillSwitch
+import stem.readside.ReadSideProcessing.{KillSwitch, _}
 import stem.readside.ReadSideWorkerActor.KeepRunning
-import zio.{Has, Runtime, Task, ZEnv, ZIO, ZLayer}
+import zio.{Runtime, Task, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration.{FiniteDuration, _}
-import ReadSideProcessing._
 
 trait ReadSideProcessing {
 
   def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch]
 }
-
-//ReadSideSettings.default(system)
 
 final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing {
 
@@ -86,14 +83,9 @@ object ReadSideProcessing {
   val memory = ZLayer.succeed {
     new ReadSideProcessing {
       def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch] = {
-        val runningTasks: Task[List[RunningProcess]] = ZIO.foreach(processes)(process => process.run)
         for {
-          tasksToShutdown <- runningTasks
-          killTask = {
-            val killed: Seq[Task[Unit]] = tasksToShutdown.map(_.shutdown)
-            Task.collectAll(killed).as()
-          }
-        } yield KillSwitch(killTask)
+          tasksToShutdown <- ZIO.foreach(processes)(process => process.run)
+        } yield KillSwitch(ZIO.foreach(tasksToShutdown)(_.shutdown).as())
       }
     }
   }

@@ -39,10 +39,11 @@ object StemApp {
     name: String,
     consumerId: ConsumerId,
     tagging: Tagging[Id],
+    parallelism: Int = 30,
     logic: (Id, Event) => Task[Unit]
   )(
     implicit runtime: Runtime[ZEnv]
-  ): ZIO[Console with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  ): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
     // use logic
     ZIO.accessM { layers =>
       val readSideProcessing = layers.get[ReadSideProcessing]
@@ -55,39 +56,46 @@ object StemApp {
         Any,
         Nothing,
         (ZStream[Any, Nothing, ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]], Seq[Process])
-      ] = for {
-        queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
-        processes = sources.map { s =>
-          Process {
-            zio.Promise.make[Throwable, Unit].flatMap { stopped =>
-              (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork.map { fiber =>
-                RunningProcess(fiber.join.as(), stopped.succeed().as())
-              }
-            }
-          }
-        }
-      } yield (ZStream.fromQueue(queue), processes)
+      ] = buildStreamAndProcesses(sources)
 
       interruptibleStreamsAndProcesses.flatMap {
         case (streamOfStreams, processes) =>
           readSideProcessing.start(name, processes.toList).flatMap { ks =>
             import zio.duration._
             ZStream
-              .mergeAll(processes.size)(streamOfStreams.map { s =>
-                s.mapMPar(30)(_.traverse { committable =>
-                    val key = committable.event.entityKey
-                    val event = committable.event.payload
-                    logic(key, event)
-                  })
-                  .runDrain
-                  .retry(Schedule.spaced(1.seconds))
-
-              })
+              .mergeAll(processes.size) {
+                streamOfStreams.mapM { s =>
+                  s.mapMPar(parallelism)(_.process { committable =>
+                      val key = committable.event.entityKey
+                      val event = committable.event.payload
+                      logic(key, event)
+                    })
+                    .runDrain
+                    .retry(Schedule.spaced(1.seconds))
+                }
+              }
               .runDrain
+              .fork
               .as(ks)
           }
       }
     }
+  }
+
+  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
+    sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
+  ) = {
+    for {
+      queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
+      processes = sources.map { s =>
+        Process {
+          for {
+            stopped <- zio.Promise.make[Throwable, Unit]
+            fiber   <- (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork
+          } yield RunningProcess(fiber.join.as(), stopped.succeed().as())
+        }
+      }
+    } yield (ZStream.fromQueue(queue), processes)
   }
 
   object Ops {

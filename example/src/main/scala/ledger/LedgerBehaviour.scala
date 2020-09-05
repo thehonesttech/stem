@@ -129,21 +129,27 @@ object ReadSideProcessor {
 
   private val task: ZIO[Console, Nothing, (String, LedgerEvent) => Task[Unit]] = ZIO.access { layer =>
     val console = layer.get
-    (key: String, event: LedgerEvent) => console.putStrLn(s"Arrived $key with event $event")
+    (key: String, event: LedgerEvent) => {
+      println("Arrived event")
+      console.putStrLn(s"Arrived $key with event $event")
+    }
   }
 
   val live
-    : ZLayer[Console with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[ReadSideProcessing.KillSwitch]] =
-    (for {
+    : ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[ReadSideProcessing.KillSwitch]] = {
+    ZLayer.fromAcquireRelease(for {
       readSideLogic <- task
       readSide <- StemApp
         .readSide[String, LedgerEvent, Long](
           "LedgerReadSide",
           ConsumerId("processing"),
           tagging,
+          30,
           readSideLogic
         )
-    } yield readSide).toLayer
+    } yield readSide)(killSwitch => killSwitch.shutdown.exitCode)
+  }
+
 
 }
 

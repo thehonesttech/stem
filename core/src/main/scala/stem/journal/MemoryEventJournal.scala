@@ -10,11 +10,11 @@ import zio.duration.Duration
 import zio.stream.ZStream
 
 import scala.collection.MapView
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import zio.duration.Duration
 
 //TODO improve performance since they are not great
 class MemoryEventJournal[Key, Event](
-  pollingInterval: FiniteDuration,
+  pollingInterval: Duration,
   internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],
   internalQueue: Queue[(Key, Event)]
 ) extends EventJournal[Key, Event]
@@ -26,7 +26,7 @@ class MemoryEventJournal[Key, Event](
     }.toList
   }
 
-  def getAppendedStream(key: Key): ZStream[Any, Nothing, Event] = ZStream.fromQueue(internalQueue).collect{
+  def getAppendedStream(key: Key): ZStream[Any, Nothing, Event] = ZStream.fromQueue(internalQueue).collect {
     case (internalKey, event) if internalKey == key => event
   }
 
@@ -42,6 +42,7 @@ class MemoryEventJournal[Key, Event](
             case (_, offset, event, tags) => (offset, event, tags)
           }
         }
+        .toMap
     }
   }
 
@@ -52,7 +53,7 @@ class MemoryEventJournal[Key, Event](
         internalEvents ++ events.zipWithIndex.map {
           case (event, index) => (key, index + offset, event, tags)
         }
-      } *> internalQueue.offerAll(events.map(ev => key -> ev)).as(())
+      } *> internalQueue.offerAll(events.map(ev => key -> ev)).unit
     }
 
   override def read(key: Key, offset: Long): stream.Stream[Nothing, EntityEvent[Key, Event]] = {
@@ -65,11 +66,12 @@ class MemoryEventJournal[Key, Event](
   }
 
   override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Throwable, JournalEntry[Long, Key, Event]] = {
-    stream.Stream.fromSchedule(Schedule.spaced(Duration.fromNanos(pollingInterval.toNanos))) *> currentEventsByTag(tag, offset)
+    stream.Stream.fromSchedule(Schedule.fixed(pollingInterval)) *> currentEventsByTag(tag, offset)
   }
 
   override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
-    val a = internal.get.map { state =>
+    val a: ZIO[Any, Nothing, List[JournalEntry[Long, Key, Event]]] = internal.get.map { state =>
+      println("Running current EventsByTag")
       state
         .flatMap {
           case (key, chunk) =>
@@ -84,16 +86,15 @@ class MemoryEventJournal[Key, Event](
           case (key, offset, event, tagList) if tagList.contains(tag.value) => JournalEntry(offset, EntityEvent(key, offset, event))
         }
     }
-
     stream.Stream.fromIterableM(a)
   }
 }
 
 object MemoryEventJournal {
-  def make[Key, Event](pollingInterval: FiniteDuration): Task[MemoryEventJournal[Key, Event]] = {
+  def make[Key, Event](pollingInterval: Duration): Task[MemoryEventJournal[Key, Event]] = {
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
-      queue <- Queue.unbounded[(Key, Event)]
+      queue    <- Queue.unbounded[(Key, Event)]
     } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue)
   }
 }

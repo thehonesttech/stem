@@ -26,7 +26,6 @@ object TestStemRuntime {
   ): ZIO[Has[MemoryEventJournal[Key, Event]], Throwable, Key => Algebra] = ZIO.accessM { layer =>
     val memoryEventJournal = layer.get
     for {
-//      memoryEventJournal            <- MemoryEventJournal.make[Key, Event](1.millis)
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
       snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
       baseAlgebraConfig = AlgebraCombinatorConfig.memory[Key, State, Event](
