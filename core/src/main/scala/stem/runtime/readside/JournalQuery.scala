@@ -6,7 +6,7 @@ import stem.runtime.{EventJournalStore, KeyValueStore}
 import stem.snapshot.KeyValueStore
 import zio.clock.Clock
 import zio.stream.{Stream, ZStream}
-import zio.{Has, Tag, Task, ZLayer, stream}
+import zio.{stream, Has, Tag, Task, ZLayer}
 
 // implementations should commit into offset store
 trait JournalQuery[O, K, E] {
@@ -50,9 +50,7 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
 
 object JournalStores {
   def memoryJournalStoreLayer[K: Tag, E: Tag]: ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
-    (for {
-      memoryStore <- EventJournalStore.memory[K, E]
-    } yield memoryStore).toLayer
+    EventJournalStore.memory[K, E].toLayer
   }
 
   def memoryCommittableJournalStore[K: Tag, E: Tag]: ZLayer[Any with Has[MemoryEventJournal[K, E]], Nothing, Has[CommittableJournalQuery[Long, K, E]]] = {

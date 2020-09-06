@@ -62,13 +62,17 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
   private val ledgerProbe = ZIO.service[StemtityProbe.Service[String, Int, LedgerEvent]]
   private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
 
-  private val testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
+  private val eventSourcedBehaviour = EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
+
+  private def testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
     LedgerEntity.tagging,
-    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
+    eventSourcedBehaviour
   )
 
-  private val env =
-  (testComponentsLayer >>> LedgerGrpcService.live) ++
-  testComponentsLayer ++
-  (testComponentsLayer >>> LedgerReadSideProcessor.live)
+  private def env = {
+    val testCompLayer = testComponentsLayer
+    (testCompLayer >>> LedgerGrpcService.live) ++
+      testCompLayer ++
+      (testCompLayer >>> LedgerReadSideProcessor.live)
+  }
 }
