@@ -6,10 +6,7 @@ import stem.data.EventTag
 import stem.runtime.readside.JournalQuery
 import zio._
 import zio.clock.Clock
-import zio.duration.Duration
 import zio.stream.ZStream
-
-import scala.collection.MapView
 import zio.duration.Duration
 
 //TODO improve performance since they are not great
@@ -71,7 +68,6 @@ class MemoryEventJournal[Key, Event](
 
   override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
     val a: ZIO[Any, Nothing, List[JournalEntry[Long, Key, Event]]] = internal.get.map { state =>
-      println("Running current EventsByTag")
       state
         .flatMap {
           case (key, chunk) =>
@@ -83,7 +79,8 @@ class MemoryEventJournal[Key, Event](
         .sortBy(_._2)
         .drop(offset.getOrElse(0L).toInt)
         .collect {
-          case (key, offset, event, tagList) if tagList.contains(tag.value) => JournalEntry(offset, EntityEvent(key, offset, event))
+          case (key, offset, event, tagList) if tagList.contains(tag.value) =>
+            JournalEntry(offset, EntityEvent(key, offset, event))
         }
     }
     stream.Stream.fromIterableM(a)

@@ -4,19 +4,14 @@ import ledger.Converters.toLedgerBigDecimal
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.communication.grpc.service.{LockReply, LockRequest, ZioService}
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent}
-import stem.StemApp
-import stem.readside.ReadSideProcessing
 import stem.runtime.akka.EventSourcedBehaviour
-import stem.runtime.readside.JournalStores.memoryJournalAndQueryStoreLayer
 import stem.test.TestStemRuntime._
 import stem.test.{StemOps, StemtityProbe}
-import zio.clock.Clock
-import zio.console.Console
 import zio.duration.durationInt
 import zio.test.Assertion.{equalTo, hasSameElements}
 import zio.test._
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{ZEnv, ZIO, ZLayer}
+import zio.{ZEnv, ZIO}
 
 object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
 
@@ -40,7 +35,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
           hasSameElements(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "test1"), AmountLocked(toLedgerBigDecimal(BigDecimal(12)), "test2")))
         ) &&
         assert(stateSecondCall)(equalTo(2))
-      }).provideLayer(zio.test.environment.testEnvironment ++ ledgerCombinator ++ stemtityLayer ++ probeLayer)
+      }).provideLayer( (testComponentsLayer >>> LedgerGrpcService.live) ++ testComponentsLayer)
     }),
     suite("End to end test with memory implementations")(
       testM("End to end test") {
@@ -51,39 +46,29 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
           service      <- ledgerGrpcService
           lockReply    <- service.lock(LockRequest("key", "accountId1", BigDecimal(10), "idempotency1"))
           stateInitial <- probe("key").state
-          _            <- TestClock.adjust(100.millis)
-//          sleeps       <- TestClock.sleeps
-//          eventsFromReadSide <- probe.eventsFromReadSide(LedgerEntity.tagging.tag)
-          console <- TestConsole.output
-//          _       <- shutdownReadSide
-//          _ = println(sleeps)
+          _            <- TestClock.adjust(100.millis) // read side is executing code
+          console      <- TestConsole.output
         } yield {
           assert(lockReply)(equalTo(LockReply("Allowed"))) &&
           assert(stateInitial)(equalTo(1)) &&
-//          assert(eventsFromReadSide)(equalTo(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "idempotency1")))) &&
-          assert(console)(equalTo(Vector("Allowed\n")))
-        }).provideLayer(zio.test.environment.testEnvironment ++ TestConsole.silent ++ TestClock.any ++ probeLayer ++ grpcServiceLayer ++ readSideProcessorLayer)
+          assert(console)(equalTo(Vector("Allowed\n", "Arrived key\n")))
+        }).provideLayer(env)
       }
     )
   )
 
-  private val ledgerProbe = ZIO.service[StemtityProbe.Service[String, Int, LedgerEvent]]
+  // helper method to retrieve stemtity, probe and grpc
   private val ledgerStemtity = ZIO.service[String => LedgerCommandHandler]
-  private val shutdownReadSide = ZIO.service[ReadSideProcessing.KillSwitch].flatMap(_.shutdown)
-
+  private val ledgerProbe = ZIO.service[StemtityProbe.Service[String, Int, LedgerEvent]]
   private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
-  private val (memoryEventJournalLayer, committableJournalQueryStore) = memoryJournalAndQueryStoreLayer[String, LedgerEvent]
-  private val readSideProcessorLayer = Console.any ++ Clock.any ++ committableJournalQueryStore ++ ReadSideProcessing.memory >>> ReadSideProcessor.live
 
-//  private val ledgerCombinator = testLayer[Int, LedgerEvent, String]
-  private val ledgerCombinator = StemApp.stubCombinator[Int, LedgerEvent, String]
-  private val stemtityLayer = (memoryEventJournalLayer >>> stemtity[String, LedgerCommandHandler, Int, LedgerEvent, String](
+  private val testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
     LedgerEntity.tagging,
     EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
-  ).toLayer)
+  )
 
-  private val probeLayer = memoryEventJournalLayer ++ ZLayer.succeed(
-    LedgerEntity.eventHandlerLogic
-  ) >>> StemtityProbe.live[String, Int, LedgerEvent]
-  private val grpcServiceLayer = stemtityLayer >>> LedgerGrpcService.live
+  private val env =
+  (testComponentsLayer >>> LedgerGrpcService.live) ++
+  testComponentsLayer ++
+  (testComponentsLayer >>> LedgerReadSideProcessor.live)
 }

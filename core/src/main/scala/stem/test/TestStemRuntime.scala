@@ -5,10 +5,15 @@ import stem.StemApp
 import stem.data.AlgebraCombinators.Combinators
 import stem.data._
 import stem.journal.{EventJournal, MemoryEventJournal}
+import stem.readside.ReadSideProcessing
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
+import stem.runtime.readside.CommittableJournalQuery
+import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
+import stem.test.StemtityProbe.StemtityProbe
 import zio.clock.Clock
 import zio.stream.ZStream
+import zio.test.environment.{TestClock, TestConsole}
 import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration._
@@ -35,6 +40,32 @@ object TestStemRuntime {
         snapshotKeyValueStore
       )
     } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
+  }
+
+  def stemtityAndReadSideLayer[Key: Tag, Algebra: Tag, State: Tag, Event: Tag, Reject: Tag](
+    tagging: Tagging[Key],
+    eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
+  )(
+    implicit env: Runtime[ZEnv],
+    protocol: StemProtocol[Algebra, State, Event, Reject]
+  ) = {
+    val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event]
+    val committableJournalQueryStore
+      : ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, Key, Event]]] = memoryEventJournalLayer >>> memoryCommittableJournalStore[
+      Key,
+      Event
+    ]
+    val eventHandlerLayer = ZLayer.succeed(eventSourcedBehaviour.eventHandler)
+    val probeLayer = memoryEventJournalLayer ++ eventHandlerLayer >>> StemtityProbe.live[Key, State, Event]
+
+    val stemtityLayer = (memoryEventJournalLayer >>> stemtity[Key, Algebra, State, Event, Reject](
+      tagging,
+      eventSourcedBehaviour
+    ).toLayer)
+
+    val combinator = StemApp.stubCombinator[State, Event, Reject]
+    val readSideProcessorRequirements = committableJournalQueryStore ++ ReadSideProcessing.memory
+   zio.test.environment.testEnvironment ++ TestConsole.silent ++ TestClock.any ++ combinator ++ stemtityLayer ++ probeLayer ++ readSideProcessorRequirements
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](

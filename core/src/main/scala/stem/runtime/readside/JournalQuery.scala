@@ -49,12 +49,18 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
 }
 
 object JournalStores {
-  def memoryJournalAndQueryStoreLayer[K: Tag, E: Tag]: (ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]], ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, K, E]]]) = {
-    val res = for {
-      memoryStore         <- EventJournalStore.memory[K, E]
-      readSideOffsetStore <- KeyValueStore.memory[TagConsumer, Long]
-    } yield (memoryStore, new CommittableJournalStore[Long, K, E](readSideOffsetStore, memoryStore): CommittableJournalQuery[Long, K, E])
-    res.map(_._1).toLayer -> res.map(_._2).toLayer
+  def memoryJournalStoreLayer[K: Tag, E: Tag]: ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
+    (for {
+      memoryStore <- EventJournalStore.memory[K, E]
+    } yield memoryStore).toLayer
+  }
+
+  def memoryCommittableJournalStore[K: Tag, E: Tag]: ZLayer[Any with Has[MemoryEventJournal[K, E]], Nothing, Has[CommittableJournalQuery[Long, K, E]]] = {
+    ZLayer.fromServiceM { (eventJournalStore: MemoryEventJournal[K, E]) =>
+      KeyValueStore.memory[TagConsumer, Long].map { readSideOffsetStore =>
+        new CommittableJournalStore[Long, K, E](readSideOffsetStore, eventJournalStore)
+      }
+    }
   }
 }
 

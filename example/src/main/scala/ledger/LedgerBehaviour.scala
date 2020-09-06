@@ -17,6 +17,7 @@ import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data._
 import stem.journal.EventJournal
+import stem.readside.ReadSideProcessing.KillSwitch
 import stem.readside.{ReadSideProcessing, ReadSideSettings}
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
@@ -26,6 +27,7 @@ import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.{Console, putStrLn}
 import zio.kafka.consumer.ConsumerSettings
+import zio.stream.ZStream
 import zio.{Has, RIO, Runtime, Task, ULayer, URIO, ZEnv, ZIO, ZLayer, console}
 
 sealed trait LockResponse
@@ -43,7 +45,8 @@ object LedgerServer extends ServerMain {
   private val actorSystem = StemApp.actorSystemLayer("System")
   private val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
   private val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
-  private val (memoryEventJournalStore, committableJournalQueryStore) = memoryJournalAndQueryStoreLayer[String, LedgerEvent]
+  private val memoryEventJournalStore = memoryJournalStoreLayer[String, LedgerEvent]
+  private val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[String, LedgerEvent]
   private val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[String, LedgerEvent]]] = memoryEventJournalStore.as[EventJournal[String, LedgerEvent]]
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
@@ -56,7 +59,7 @@ object LedgerServer extends ServerMain {
   private val ledgerEntity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity to InboundMessageHandling.liveLayer
   private val readSideProcessing = actorSystem and readSideSettings to ReadSideProcessing.live
-  private val readSideProcessor = (ZEnv.live and readSideProcessing and committableJournalQueryStore) to ReadSideProcessor.live
+  private val readSideProcessor = (ZEnv.live and readSideProcessing and committableJournalQueryStore) to LedgerReadSideProcessor.live
   private val ledgerService = ledgerEntity to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
@@ -123,19 +126,18 @@ object LedgerEntity {
   val live: ZLayer[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[String, LedgerEvent]], Throwable, Has[Ledgers]] = stemtity.toLayer
 }
 
-object ReadSideProcessor {
+object LedgerReadSideProcessor {
 
   implicit val runtime: Runtime[ZEnv] = LedgerServer
 
   private val task: ZIO[Console, Nothing, (String, LedgerEvent) => Task[Unit]] = ZIO.access { layer =>
-    val console = layer.get
+    val cons = layer.get
     (key: String, event: LedgerEvent) => {
-      println("Arrived event")
-      console.putStrLn(s"Arrived $key with event $event")
+      cons.putStrLn(s"Arrived $key")
     }
   }
 
-  val live
+    val live
     : ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[ReadSideProcessing.KillSwitch]] = {
     ZLayer.fromAcquireRelease(for {
       readSideLogic <- task
@@ -149,8 +151,6 @@ object ReadSideProcessor {
         )
     } yield readSide)(killSwitch => killSwitch.shutdown.exitCode)
   }
-
-
 }
 
 object InboundMessageHandling {
