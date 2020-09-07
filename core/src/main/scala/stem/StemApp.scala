@@ -10,6 +10,7 @@ import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
 import stem.runtime.readside.CommittableJournalQuery
 import zio.clock.Clock
 import zio.console.Console
+import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.{Has, IO, Managed, Queue, RIO, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
@@ -52,26 +53,26 @@ object StemApp {
         journal.eventsByTag(tag, consumerId)
       }
       // convert into process
-      val a = buildStreamAndProcesses(sources).flatMap {
+      buildStreamAndProcesses(sources).flatMap {
         case (streams, processes) =>
           readSideProcessing.start(name, processes.toList).flatMap { ks =>
           // it starts only when all the streams start, it should dynamically merge
             streams.take(processes.size).runCollect.flatMap { elements =>
               val listOfStreams = elements.toList
               val processingStreams = listOfStreams.map { stream =>
-                stream.mapMPar(parallelism) { element =>
+                ZStream.fromEffect(stream.mapMPar(parallelism) { element =>
                   val journalEntry = element.value
                   val commit = element.commit
                   val key = journalEntry.event.entityKey
                   val event = journalEntry.event.payload
                   logic(key, event) <* commit
-                }
+                }.runDrain.retry(Schedule.fixed(1.second)))
               }
               ZStream.mergeAll(sources.size)(processingStreams: _*).runDrain.fork.as(ks)
             }
           }
       }
-      a
+
     }
     //      readSideProcessing.start(name, )
     // processing should be start by process, process should
