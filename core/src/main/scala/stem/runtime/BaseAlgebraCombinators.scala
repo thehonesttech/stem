@@ -120,17 +120,6 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
 
 }
 
-object EventJournalStore {
-
-  def memory[Key: Tag, Event: Tag]: ZIO[Any, Nothing, MemoryEventJournal[Key, Event]] = {
-    import zio.duration._
-    for {
-      internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
-      queue <- Queue.unbounded[(Key, Event)]
-    } yield new MemoryEventJournal[Key, Event](100.millis, internal, queue)
-  }
-
-}
 
 object KeyValueStore {
   def memory[Key: Tag, Value: Tag]: ZIO[Any, Nothing, KeyValueStore[Key, Value]] = {

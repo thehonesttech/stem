@@ -12,11 +12,11 @@ import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memor
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
 import stem.test.StemtityProbe.StemtityProbe
 import zio.clock.Clock
+import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer, duration}
 
-import scala.concurrent.duration._
 
 object TestStemRuntime {
 
@@ -44,12 +44,13 @@ object TestStemRuntime {
 
   def stemtityAndReadSideLayer[Key: Tag, Algebra: Tag, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
-    eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
+    eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
+    readSidePollingInterval: duration.Duration = 100.millis
   )(
     implicit env: Runtime[ZEnv],
     protocol: StemProtocol[Algebra, State, Event, Reject]
   ) = {
-    val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event]
+    val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
     val committableJournalQueryStore
       : ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, Key, Event]]] = memoryEventJournalLayer >>> memoryCommittableJournalStore[
       Key,
@@ -65,7 +66,8 @@ object TestStemRuntime {
 
     val combinator = StemApp.stubCombinator[State, Event, Reject]
     val readSideProcessorRequirements = committableJournalQueryStore ++ ReadSideProcessing.memory
-   zio.test.environment.testEnvironment ++ TestConsole.silent ++ TestClock.any ++ combinator ++ stemtityLayer ++ probeLayer ++ readSideProcessorRequirements
+
+    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ combinator ++ stemtityLayer ++ probeLayer ++ readSideProcessorRequirements
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](

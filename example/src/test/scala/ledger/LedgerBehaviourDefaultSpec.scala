@@ -46,7 +46,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
           service      <- ledgerGrpcService
           lockReply    <- service.lock(LockRequest("key", "accountId1", BigDecimal(10), "idempotency1"))
           stateInitial <- probe("key").state
-          _            <- TestClock.adjust(100.millis) // read side is executing code
+          _            <- TestClock.adjust(200.millis) // read side is executing code (100 millis is the polling interval)
           console      <- TestConsole.output
         } yield {
           assert(lockReply)(equalTo(LockReply("Allowed"))) &&
@@ -55,7 +55,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
         }).provideLayer(env)
       }
     )
-  )
+  ).provideCustomLayerShared(TestConsole.silent)
 
   // helper method to retrieve stemtity, probe and grpc
   private val ledgerStemtity = ZIO.service[String => LedgerCommandHandler]
@@ -71,7 +71,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
 
   private def env = {
     val testCompLayer = testComponentsLayer
-    (testCompLayer >>> LedgerGrpcService.live) ++
+     (testCompLayer >>> LedgerGrpcService.live) ++
       testCompLayer ++
       (testCompLayer >>> LedgerReadSideProcessor.live)
   }

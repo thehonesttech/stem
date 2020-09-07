@@ -26,6 +26,7 @@ import stem.runtime.{AlgebraTransformer, Fold}
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.{Console, putStrLn}
+import zio.duration.{Duration, durationInt}
 import zio.kafka.consumer.ConsumerSettings
 import zio.stream.ZStream
 import zio.{Has, RIO, Runtime, Task, ULayer, URIO, ZEnv, ZIO, ZLayer, console}
@@ -42,10 +43,11 @@ object LedgerServer extends ServerMain {
   import stem.test.ZIOOps._
 
   type LedgerCombinator = AlgebraCombinators[Int, LedgerEvent, String]
+  val readSidePollingInterval: Duration = 100.millis
   private val actorSystem = StemApp.actorSystemLayer("System")
   private val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
   private val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
-  private val memoryEventJournalStore = memoryJournalStoreLayer[String, LedgerEvent]
+  private val memoryEventJournalStore = memoryJournalStoreLayer[String, LedgerEvent](readSidePollingInterval)
   private val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[String, LedgerEvent]
   private val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[String, LedgerEvent]]] = memoryEventJournalStore.as[EventJournal[String, LedgerEvent]]
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =

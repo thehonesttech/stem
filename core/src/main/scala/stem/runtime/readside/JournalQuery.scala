@@ -1,12 +1,13 @@
 package stem.runtime.readside
 
 import stem.data._
-import stem.journal.{EventJournal, JournalEntry, MemoryEventJournal}
-import stem.runtime.{EventJournalStore, KeyValueStore}
+import stem.journal.{JournalEntry, MemoryEventJournal}
+import stem.runtime.KeyValueStore
 import stem.snapshot.KeyValueStore
 import zio.clock.Clock
+import zio.duration.durationInt
 import zio.stream.{Stream, ZStream}
-import zio.{stream, Has, Tag, Task, ZLayer}
+import zio._
 
 // implementations should commit into offset store
 trait JournalQuery[O, K, E] {
@@ -33,7 +34,8 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
   ): ZStream[R, Throwable, Committable[JournalEntry[O, K, E]]] = {
     val tagConsumerId = TagConsumer(tag, consumerId)
     stream.Stream
-      .fromEffect {
+      .fromEffect(Task.unit)
+      .mapM { _ =>
         offsetStore.getValue(tagConsumerId)
       }
       .flatMap(inner)
@@ -49,8 +51,8 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
 }
 
 object JournalStores {
-  def memoryJournalStoreLayer[K: Tag, E: Tag]: ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
-    EventJournalStore.memory[K, E].toLayer
+  def memoryJournalStoreLayer[K: Tag, E: Tag](pollingInterval: duration.Duration): ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
+    MemoryEventJournal.make[K, E](pollingInterval).toLayer
   }
 
   def memoryCommittableJournalStore[K: Tag, E: Tag]: ZLayer[Any with Has[MemoryEventJournal[K, E]], Nothing, Has[CommittableJournalQuery[Long, K, E]]] = {
@@ -61,4 +63,3 @@ object JournalStores {
     }
   }
 }
-
