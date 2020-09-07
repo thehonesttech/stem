@@ -100,12 +100,16 @@ object StemApp {
     } yield (ZStream.fromQueue(queue), processes)
   }
 
+  def actorSettings(actorSystemName: String) = {
+    val actorSystem = StemApp.actorSystemLayer(actorSystemName)
+    val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
+    val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
+    actorSystem ++ readSideSettings ++ runtimeSettings
+  }
+
   def stemStores[Key: Tag, Event: Tag](
     readSidePollingInterval: duration.Duration = 100.millis
   ) = {
-//    val actorSystem = StemApp.actorSystemLayer(actorSystemName)
-//    val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
-//    val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
     val memoryEventJournalStore = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
     val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[Key, Event]
     val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[Key, Event]]] = memoryEventJournalStore.map { layer =>

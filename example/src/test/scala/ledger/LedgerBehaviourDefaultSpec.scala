@@ -5,16 +5,16 @@ import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.communication.grpc.service.{LockReply, LockRequest, ZioService}
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent}
 import stem.runtime.akka.EventSourcedBehaviour
+import stem.test.StemtityProbe
 import stem.test.TestStemRuntime._
-import stem.test.{StemOps, StemtityProbe}
 import zio.duration.durationInt
 import zio.test.Assertion.{equalTo, hasSameElements}
+import zio.test.Eql._
 import zio.test._
 import zio.test.environment.{TestClock, TestConsole}
 import zio.{ZEnv, ZIO}
-import Eql._
 
-object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
+object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   def spec =
     suite("LedgerSpec")(
@@ -40,7 +40,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
           ) &&
           assert(updatedState)(equalTo(2)) &&
           assert(initialStateForSecondEntity)(equalTo(1))
-        }).provideLayer((testComponentsLayer >>> LedgerGrpcService.live) ++ testComponentsLayer)
+        }).provideLayer(testComponentsLayer)
       }),
       suite("End to end test with memory implementations")(
         testM("End to end test") {

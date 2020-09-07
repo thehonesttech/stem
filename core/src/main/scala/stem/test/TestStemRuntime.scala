@@ -4,30 +4,24 @@ import scodec.bits.BitVector
 import stem.StemApp
 import stem.data.AlgebraCombinators.Combinators
 import stem.data._
-import stem.journal.{EventJournal, MemoryEventJournal}
+import stem.journal.MemoryEventJournal
 import stem.readside.ReadSideProcessing
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
-import stem.runtime.readside.CommittableJournalQuery
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
-import stem.test.StemOps.testLayer
-import stem.test.StemtityProbe.StemtityProbe
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{duration, Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{duration, Chunk, Has, RIO, Runtime, Tag, Task, UIO, ZEnv, ZIO, ZLayer}
 
 object TestStemRuntime {
-
-//  case class StemtityAndProbe[Key, Algebra, State, Event](algebra: Key => Algebra, probe: StemtityProbe[Key, State, Event])
 
   def stemtity[Key: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
   )(
-    implicit runtime: Runtime[ZEnv],
-    protocol: StemProtocol[Algebra, State, Event, Reject]
+    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[MemoryEventJournal[Key, Event]], Throwable, Key => Algebra] = ZIO.accessM { layer =>
     val memoryEventJournal = layer.get
     for {
@@ -47,20 +41,24 @@ object TestStemRuntime {
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
     readSidePollingInterval: duration.Duration = 100.millis
   )(
-    implicit env: Runtime[ZEnv],
-    protocol: StemProtocol[Algebra, State, Event, Reject]
+    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ) = {
     val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
-    val stemtityAndProbe = memoryEventJournalLayer  >+> ( StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler) ++ stemtity[Key, Algebra, State, Event, Reject](
-      tagging,
-      eventSourcedBehaviour
-    ).toLayer ++ memoryCommittableJournalStore[
-      Key,
-      Event
-    ])
-
-    val combinator = StemApp.stubCombinator[State, Event, Reject]
-    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ combinator ++ stemtityAndProbe ++ ReadSideProcessing.memory
+    val stemtityAndProbe = memoryEventJournalLayer >+> (StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler) ++ stemtity[
+        Key,
+        Algebra,
+        State,
+        Event,
+        Reject
+      ](
+        tagging,
+        eventSourcedBehaviour
+      ).toLayer ++ memoryCommittableJournalStore[
+        Key,
+        Event
+      ])
+    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ StemApp
+      .stubCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
@@ -78,7 +76,8 @@ object TestStemRuntime {
             case Some(combinator) =>
               combinator
             case None =>
-              KeyedAlgebraCombinators.fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig)
+              KeyedAlgebraCombinators
+                .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig)
                 .flatMap { combinator =>
                   val uioCombinator = UIO.succeed(combinator)
                   uioCombinator <* ZIO.effectTotal {
@@ -119,25 +118,24 @@ object StemtityProbe {
     def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
   }
 
-  def live[Key: Tag, State: Tag, Event: Tag](eventHandler: Fold[State, Event]) = ZLayer.fromService {
-    (memoryEventJournal: MemoryEventJournal[Key, Event]) =>
-      new Service[Key, State, Event] {
+  def live[Key: Tag, State: Tag, Event: Tag](eventHandler: Fold[State, Event]) = ZLayer.fromService { (memoryEventJournal: MemoryEventJournal[Key, Event]) =>
+    new Service[Key, State, Event] {
 
-        def apply(key: Key) = KeyedProbeOperations(
-          state = state(key),
-          events = events(key),
-          eventStream = eventStream(key)
-        )
-        private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
-        private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
-        private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
+      def apply(key: Key) = KeyedProbeOperations(
+        state = state(key),
+        events = events(key),
+        eventStream = eventStream(key)
+      )
+      private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
+      private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
+      private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
 
-        def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
-          memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
+      def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+        memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
 
-        def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
-          memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
-      }
+      def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
+        memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
+    }
 
   }
 
@@ -146,13 +144,7 @@ object StemtityProbe {
 trait StemOps {
   implicit val runtime: zio.Runtime[ZEnv] = zio.Runtime.default
 
-  def testLayer[State: Tag, Event: Tag, Reject: Tag]
-    : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
-    zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
-
 }
-
-object StemOps extends StemOps
 
 object ZIOOps {
 
@@ -171,6 +163,10 @@ object ZIOOps {
       runtime.unsafeRun(returnType)
     }
   }
+
+  def testLayer[State: Tag, Event: Tag, Reject: Tag]
+    : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
+    zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
 
   implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
     def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {

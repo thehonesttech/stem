@@ -3,7 +3,7 @@ package ledger
 import akka.actor.ActorSystem
 import io.grpc.Status
 import ledger.Converters._
-import ledger.LedgerEntity.{LedgerCommandHandler, tagging}
+import ledger.LedgerEntity.{tagging, LedgerCommandHandler}
 import ledger.LedgerGrpcService.Ledgers
 import ledger.InboundMessageHandling.ConsumerConfiguration
 import ledger.communication.grpc.service.ZioService.ZLedger
@@ -25,11 +25,11 @@ import stem.runtime.readside.{CommittableJournalQuery, JournalStores}
 import stem.runtime.{AlgebraTransformer, Fold}
 import zio.blocking.Blocking
 import zio.clock.Clock
-import zio.console.{Console, putStrLn}
-import zio.duration.{Duration, durationInt}
+import zio.console.{putStrLn, Console}
+import zio.duration.{durationInt, Duration}
 import zio.kafka.consumer.ConsumerSettings
 import zio.stream.ZStream
-import zio.{Has, RIO, Runtime, Task, ULayer, URIO, ZEnv, ZIO, ZLayer, console}
+import zio.{console, Has, RIO, Runtime, Task, ULayer, URIO, ZEnv, ZIO, ZLayer}
 
 sealed trait LockResponse
 
@@ -39,15 +39,9 @@ case class Denied(reason: String) extends LockResponse
 
 object LedgerServer extends ServerMain {
 
-  import JournalStores._
-  import stem.test.ZIOOps._
-
   type LedgerCombinator = AlgebraCombinators[Int, LedgerEvent, String]
   val readSidePollingInterval: Duration = 100.millis
-  private val actorSystem = StemApp.actorSystemLayer("System")
-  private val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
-  private val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
-  private val stemLedgerStores = StemApp.stemStores[String, LedgerEvent]()
+  private val stemRuntimeLayer = StemApp.stemStores[String, LedgerEvent]() ++ StemApp.actorSettings("System")
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
       KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
@@ -56,10 +50,10 @@ object LedgerServer extends ServerMain {
       )
     )
 
-  private val ledgerEntity = (actorSystem and runtimeSettings and stemLedgerStores to LedgerEntity.live)
+  private val ledgerEntity = stemRuntimeLayer to LedgerEntity.live
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity to InboundMessageHandling.liveLayer
-  private val readSideProcessing = actorSystem and readSideSettings to ReadSideProcessing.live
-  private val readSideProcessor = (ZEnv.live and readSideProcessing and stemLedgerStores) to LedgerReadSideProcessor.live
+  private val readSideProcessing = stemRuntimeLayer to ReadSideProcessing.live
+  private val readSideProcessor = (ZEnv.live and readSideProcessing and stemRuntimeLayer) to LedgerReadSideProcessor.live
   private val ledgerService = ledgerEntity to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
@@ -137,8 +131,9 @@ object LedgerReadSideProcessor {
     }
   }
 
-    val live
-    : ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[ReadSideProcessing.KillSwitch]] = {
+  val live: ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, String, LedgerEvent]], Throwable, Has[
+    ReadSideProcessing.KillSwitch
+  ]] = {
     ZLayer.fromAcquireRelease(for {
       readSideLogic <- task
       readSide <- StemApp
