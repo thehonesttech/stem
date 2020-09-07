@@ -16,8 +16,7 @@ import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer, duration}
-
+import zio.{duration, Chunk, Has, RIO, Ref, Runtime, Tag, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
 
 object TestStemRuntime {
 
@@ -52,23 +51,16 @@ object TestStemRuntime {
     protocol: StemProtocol[Algebra, State, Event, Reject]
   ) = {
     val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
-    val committableJournalQueryStore
-      : ZLayer[Any, Nothing, Has[CommittableJournalQuery[Long, Key, Event]]] = memoryEventJournalLayer >>> memoryCommittableJournalStore[
-      Key,
-      Event
-    ]
-    val eventHandlerLayer = ZLayer.succeed(eventSourcedBehaviour.eventHandler)
-    val probeLayer = memoryEventJournalLayer ++ eventHandlerLayer >>> StemtityProbe.live[Key, State, Event]
-
-    val stemtityLayer = (memoryEventJournalLayer >>> stemtity[Key, Algebra, State, Event, Reject](
+    val stemtityAndProbe = memoryEventJournalLayer  >+> ( StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler) ++ stemtity[Key, Algebra, State, Event, Reject](
       tagging,
       eventSourcedBehaviour
-    ).toLayer)
+    ).toLayer ++ memoryCommittableJournalStore[
+      Key,
+      Event
+    ])
 
     val combinator = StemApp.stubCombinator[State, Event, Reject]
-    val readSideProcessorRequirements = committableJournalQueryStore ++ ReadSideProcessing.memory
-
-    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ combinator ++ stemtityLayer ++ probeLayer ++ readSideProcessorRequirements
+    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ combinator ++ stemtityAndProbe ++ ReadSideProcessing.memory
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
@@ -86,16 +78,7 @@ object TestStemRuntime {
             case Some(combinator) =>
               combinator
             case None =>
-              Ref
-                .make[Option[State]](None)
-                .map { state =>
-                  new KeyedAlgebraCombinators[Key, State, Event, Reject](
-                    key,
-                    state,
-                    eventSourcedBehaviour.eventHandler,
-                    algebraCombinatorConfig
-                  )
-                }
+              KeyedAlgebraCombinators.fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig)
                 .flatMap { combinator =>
                   val uioCombinator = UIO.succeed(combinator)
                   uioCombinator <* ZIO.effectTotal {
@@ -136,24 +119,25 @@ object StemtityProbe {
     def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
   }
 
-  def live[Key: Tag, State: Tag, Event: Tag] = ZLayer.fromServices { (memoryEventJournal: MemoryEventJournal[Key, Event], eventHandler: Fold[State, Event]) =>
-    new Service[Key, State, Event] {
+  def live[Key: Tag, State: Tag, Event: Tag](eventHandler: Fold[State, Event]) = ZLayer.fromService {
+    (memoryEventJournal: MemoryEventJournal[Key, Event]) =>
+      new Service[Key, State, Event] {
 
-      def apply(key: Key) = KeyedProbeOperations(
-        state = state(key),
-        events = events(key),
-        eventStream = eventStream(key)
-      )
-      private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
-      private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
-      private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
+        def apply(key: Key) = KeyedProbeOperations(
+          state = state(key),
+          events = events(key),
+          eventStream = eventStream(key)
+        )
+        private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
+        private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
+        private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
 
-      def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
-        memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
+        def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+          memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
 
-      def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
-        memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
-    }
+        def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
+          memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
+      }
 
   }
 

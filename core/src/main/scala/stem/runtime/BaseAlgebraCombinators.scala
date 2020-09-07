@@ -7,7 +7,6 @@ import stem.runtime.readside.JournalQuery
 import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import zio.{Ref, _}
 
-
 case class AlgebraCombinatorConfig[Key: Tag, State: Tag, Event: Tag](
   eventJournalOffsetStore: KeyValueStore[Key, Long],
   tagging: Tagging[Key],
@@ -32,7 +31,7 @@ object AlgebraCombinatorConfig {
     memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
     tagging: Tagging[Key],
     memoryEventJournal: EventJournal[Key, Event],
-    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]],
+    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]]
   ): AlgebraCombinatorConfig[Key, State, Event] = {
     new AlgebraCombinatorConfig(
       memoryEventJournalOffsetStore,
@@ -120,6 +119,23 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
 
 }
 
+object KeyedAlgebraCombinators {
+  def fromParams[Key: Tag, State: Tag, Event: Tag, Reject](
+    key: Key,
+    userBehaviour: Fold[State, Event],
+    algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
+  ): ZIO[Any, Nothing, KeyedAlgebraCombinators[Key, State, Event, Reject]] =
+    Ref
+      .make[Option[State]](None)
+      .map { state =>
+        new KeyedAlgebraCombinators[Key, State, Event, Reject](
+          key,
+          state,
+          userBehaviour,
+          algebraCombinatorConfig
+        )
+      }
+}
 
 object KeyValueStore {
   def memory[Key: Tag, Value: Tag]: ZIO[Any, Nothing, KeyValueStore[Key, Value]] = {
@@ -128,7 +144,6 @@ object KeyValueStore {
     } yield new MemoryKeyValueStore[Key, Value](internalKeyValueStore)
   }
 }
-
 
 // TODO: can the output be a Task or must it be a State?
 final case class Fold[State, Event](initial: State, reduce: (State, Event) => Task[State]) {

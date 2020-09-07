@@ -21,7 +21,7 @@ object StemActor {
 }
 
 private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
-  eventsourcedBehavior: EventSourcedBehaviour[Algebra, State, Event, Reject],
+  eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
 )(implicit runtime: Runtime[ZEnv], protocol: StemProtocol[Algebra, State, Event, Reject])
     extends Actor
@@ -39,18 +39,8 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       throw new IllegalArgumentException(error)
     }
 
-  private val algebraCombinators = Ref
-    .make[Option[State]](None)
-    .map { state =>
-      new KeyedAlgebraCombinators[Key, State, Event, Reject](
-        key,
-        state,
-        eventsourcedBehavior.eventHandler,
-        algebraCombinatorConfig
-      )
-    }
-
-  private val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] = algebraCombinators.toLayer
+  private val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
+    KeyedAlgebraCombinators.fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig).toLayer
 
   override def receive: Receive = {
     case Start =>
@@ -64,7 +54,7 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
     case CommandInvocation(bytes) =>
       //macro creates a map of functions of path -> Invocation
       val invocation: Invocation[State, Event, Reject] =
-        protocol.server(eventsourcedBehavior.algebra, eventsourcedBehavior.errorHandler)
+        protocol.server(eventSourcedBehaviour.algebra, eventSourcedBehaviour.errorHandler)
 
       sender() ! runtime
         .unsafeRunToFuture(
