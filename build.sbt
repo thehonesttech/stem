@@ -33,6 +33,11 @@ lazy val `example` = stemModule("example", "Ledger example")
   .settings(libraryDependencies ++= testDeps)
   .settings(zioTest)
   .settings(commonProtobufSettings)
+lazy val benchmarks = stemModule("benchmarks", "Stem Benchmarks")
+  .dependsOn(core, example)
+  .settings(libraryDependencies ++= allDeps)
+  .enablePlugins(JmhPlugin)
+
 
 lazy val root = (project in file("."))
   .settings(
@@ -59,15 +64,12 @@ val testDeps = Seq(
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",
-  "dev.zio" %% "zio-akka-cluster" % "0.2.0",
+  "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.31",
+  "com.typesafe.akka" %% "akka-cluster" % "2.5.31",
   "dev.zio" %% "zio-streams" % "1.0.0",
   "dev.zio" %% "zio-kafka" % "0.12.0",
-  "dev.zio" %% "zio-config" % "1.0.0-RC26",
-  "dev.zio" %% "zio-config-magnolia" % "1.0.0-RC26",
   "io.suzaku" %% "boopickle" % "1.3.2",
-  "dev.zio" %% "zio-logging" % "0.3.2",
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0",
-  "org.typelevel" %% "cats-core" % "2.0.0",
   "org.scodec" %% "scodec-bits" % "1.1.13",
   "org.scodec" %% "scodec-core" % "1.11.4",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
@@ -76,6 +78,6 @@ val allDeps = Seq(
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps
 
-aggregateProjects(`core`, `example`, `data`, `readside`, `macros`)
+aggregateProjects(`core`, `example`, `data`, `readside`, `macros`, `benchmarks`)
 
 val zioTest = testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")

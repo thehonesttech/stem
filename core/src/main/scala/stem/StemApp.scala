@@ -3,15 +3,20 @@ package stem
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
 import stem.data.AlgebraCombinators.Combinators
-import stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
-import stem.journal.JournalEntry
-import stem.readside.ReadSideProcessing
+import stem.data.{AlgebraCombinators, Committable, ConsumerId, StemProtocol, Tagging}
+import stem.journal.{EventJournal, JournalEntry}
+import stem.readside.{ReadSideProcessing, ReadSideSettings}
 import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
+import stem.runtime.akka.{EventSourcedBehaviour, RuntimeSettings}
 import stem.runtime.readside.CommittableJournalQuery
+import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
+import stem.test.StemtityProbe
+import stem.test.TestStemRuntime.stemtity
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
-import zio.{Has, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.test.environment.{TestClock, TestConsole}
+import zio.{duration, Has, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 // idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error
 
@@ -53,17 +58,22 @@ object StemApp {
       buildStreamAndProcesses(sources).flatMap {
         case (streams, processes) =>
           readSideProcessing.start(name, processes.toList).flatMap { ks =>
-          // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
+            // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
             streams.take(processes.size).runCollect.flatMap { elements =>
               val listOfStreams = elements.toList
               val processingStreams = listOfStreams.map { stream =>
-                ZStream.fromEffect(stream.mapMPar(parallelism) { element =>
-                  val journalEntry = element.value
-                  val commit = element.commit
-                  val key = journalEntry.event.entityKey
-                  val event = journalEntry.event.payload
-                  logic(key, event) <* commit
-                }.runDrain.retry(Schedule.fixed(1.second)))
+                ZStream.fromEffect(
+                  stream
+                    .mapMPar(parallelism) { element =>
+                      val journalEntry = element.value
+                      val commit = element.commit
+                      val key = journalEntry.event.entityKey
+                      val event = journalEntry.event.payload
+                      logic(key, event) <* commit
+                    }
+                    .runDrain
+                    .retry(Schedule.fixed(1.second))
+                )
               }
               ZStream.mergeAll(sources.size)(processingStreams: _*).runDrain.fork.as(ks)
             }
@@ -88,6 +98,20 @@ object StemApp {
         }
       }
     } yield (ZStream.fromQueue(queue), processes)
+  }
+
+  def stemStores[Key: Tag, Event: Tag](
+    readSidePollingInterval: duration.Duration = 100.millis
+  ) = {
+//    val actorSystem = StemApp.actorSystemLayer(actorSystemName)
+//    val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
+//    val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
+    val memoryEventJournalStore = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
+    val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[Key, Event]
+    val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[Key, Event]]] = memoryEventJournalStore.map { layer =>
+      Has(layer.get.asInstanceOf[EventJournal[Key, Event]])
+    }
+    committableJournalQueryStore ++ eventJournalStore ++ memoryEventJournalStore
   }
 
   object Ops {

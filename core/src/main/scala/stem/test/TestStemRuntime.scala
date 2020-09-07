@@ -10,6 +10,7 @@ import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender
 import stem.runtime.readside.CommittableJournalQuery
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
+import stem.test.StemOps.testLayer
 import stem.test.StemtityProbe.StemtityProbe
 import zio.clock.Clock
 import zio.duration.durationInt
@@ -165,19 +166,6 @@ trait StemOps {
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
     zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
 
-  implicit class RichZIO[Reject, Result](returnType: ZIO[Any, Reject, Result]) {
-    // I need the key here
-
-    def runSync(implicit runtime: Runtime[ZEnv]): Result = {
-      runtime.unsafeRun(returnType)
-    }
-  }
-
-  implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
-    def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {
-      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State, Event, Reject]))
-    }
-  }
 }
 
 object StemOps extends StemOps
@@ -191,4 +179,19 @@ object ZIOOps {
       }
     }
   }
+
+  implicit class RichZIO[Reject, Result](returnType: ZIO[Any, Reject, Result]) {
+    // I need the key here
+
+    def runSync(implicit runtime: Runtime[ZEnv]): Result = {
+      runtime.unsafeRun(returnType)
+    }
+  }
+
+  implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
+    def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {
+      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State, Event, Reject]))
+    }
+  }
+
 }

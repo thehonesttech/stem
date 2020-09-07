@@ -47,9 +47,7 @@ object LedgerServer extends ServerMain {
   private val actorSystem = StemApp.actorSystemLayer("System")
   private val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
   private val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
-  private val memoryEventJournalStore = memoryJournalStoreLayer[String, LedgerEvent](readSidePollingInterval)
-  private val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[String, LedgerEvent]
-  private val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[String, LedgerEvent]]] = memoryEventJournalStore.as[EventJournal[String, LedgerEvent]]
+  private val stemLedgerStores = StemApp.stemStores[String, LedgerEvent]()
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
       KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
@@ -58,14 +56,14 @@ object LedgerServer extends ServerMain {
       )
     )
 
-  private val ledgerEntity = (actorSystem and runtimeSettings and eventJournalStore to LedgerEntity.live)
+  private val ledgerEntity = (actorSystem and runtimeSettings and stemLedgerStores to LedgerEntity.live)
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity to InboundMessageHandling.liveLayer
   private val readSideProcessing = actorSystem and readSideSettings to ReadSideProcessing.live
-  private val readSideProcessor = (ZEnv.live and readSideProcessing and committableJournalQueryStore) to LedgerReadSideProcessor.live
+  private val readSideProcessor = (ZEnv.live and readSideProcessing and stemLedgerStores) to LedgerReadSideProcessor.live
   private val ledgerService = ledgerEntity to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    ledgerService and kafkaMessageHandling and readSideProcessor
+    (ledgerService and kafkaMessageHandling and readSideProcessor).mapError(_ => new RuntimeException("Bad layer"))
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }

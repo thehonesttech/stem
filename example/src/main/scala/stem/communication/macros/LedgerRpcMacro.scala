@@ -9,6 +9,7 @@ import scodec.bits.BitVector
 import stem.data.{AlgebraCombinators, Invocation, StemProtocol}
 import zio.{Has, IO, Task, ZIO}
 
+// THIS IS USED ONLY TO verify the macro - do not use it
 @deprecated("Use RpcMacro")
 object LedgerRpcMacro {
 

@@ -12,6 +12,7 @@ import zio.test.Assertion.{equalTo, hasSameElements}
 import zio.test._
 import zio.test.environment.{TestClock, TestConsole}
 import zio.{ZEnv, ZIO}
+import Eql._
 
 object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
 
@@ -37,6 +38,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
         assert(stateSecondCall)(equalTo(2))
       }).provideLayer( (testComponentsLayer >>> LedgerGrpcService.live) ++ testComponentsLayer)
     }),
+
+
     suite("End to end test with memory implementations")(
       testM("End to end test") {
         import Converters.Ops._
@@ -62,11 +65,9 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec with StemOps {
   private val ledgerProbe = ZIO.service[StemtityProbe.Service[String, Int, LedgerEvent]]
   private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
 
-  private val eventSourcedBehaviour = EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
-
   private def testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
     LedgerEntity.tagging,
-    eventSourcedBehaviour
+    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
   )
 
   private def env = {
