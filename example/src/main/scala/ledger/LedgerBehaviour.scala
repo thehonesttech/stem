@@ -133,7 +133,6 @@ object LedgerReadSideProcessor {
   private val task: ZIO[Console, Nothing, (String, LedgerEvent) => Task[Unit]] = ZIO.access { layer =>
     val cons = layer.get
     (key: String, event: LedgerEvent) => {
-      println("Processing")
       cons.putStrLn(s"Arrived $key")
     }
   }

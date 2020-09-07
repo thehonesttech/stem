@@ -56,7 +56,7 @@ object StemApp {
       buildStreamAndProcesses(sources).flatMap {
         case (streams, processes) =>
           readSideProcessing.start(name, processes.toList).flatMap { ks =>
-          // it starts only when all the streams start, it should dynamically merge
+          // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
             streams.take(processes.size).runCollect.flatMap { elements =>
               val listOfStreams = elements.toList
               val processingStreams = listOfStreams.map { stream =>
