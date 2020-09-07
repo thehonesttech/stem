@@ -13,6 +13,8 @@ import zio.console.Console
 import zio.stream.ZStream
 import zio.{Has, IO, Managed, Queue, RIO, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
+import scala.collection.mutable
+
 // idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error
 
 object StemApp {
@@ -35,118 +37,161 @@ object StemApp {
       Managed.make(Task(ActorSystem(name, ConfigFactory.load(confFileName))))(sys => Task.fromFuture(_ => sys.terminate()).either)
     )
 
-  def readSideStream[Id: Tag, Event: Tag, Offset: Tag](
+  def readSide[Id: Tag, Event: Tag, Offset: Tag](
     name: String,
     consumerId: ConsumerId,
     tagging: Tagging[Id],
     parallelism: Int = 30,
     logic: (Id, Event) => Task[Unit]
-  ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, Unit] = {
+  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
     // simplify and then improve it
-    ZStream.accessStream { layers =>
+    ZIO.accessM { layers =>
       val readSideProcessing = layers.get[ReadSideProcessing]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
       val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
         journal.eventsByTag(tag, consumerId)
       }
       // convert into process
-
-      //      readSideProcessing.start(name, )
-      val processingStreams = sources.map { stream =>
-        stream.mapMPar(parallelism) { element =>
-          val journalEntry = element.value
-          val commit = element.commit
-          val key = journalEntry.event.entityKey
-          val event = journalEntry.event.payload
-          logic(key, event) <* commit /* : RIO[Clock, Unit]*/
-        }
+      val a = buildStreamAndProcesses(sources).flatMap {
+        case (streams, processes) =>
+          readSideProcessing.start(name, processes.toList).flatMap { ks =>
+          // it starts only when all the streams start, it should dynamically merge
+            streams.take(processes.size).runCollect.flatMap { elements =>
+              val listOfStreams = elements.toList
+              val processingStreams = listOfStreams.map { stream =>
+                stream.mapMPar(parallelism) { element =>
+                  val journalEntry = element.value
+                  val commit = element.commit
+                  val key = journalEntry.event.entityKey
+                  val event = journalEntry.event.payload
+                  logic(key, event) <* commit
+                }
+              }
+              ZStream.mergeAll(sources.size)(processingStreams: _*).runDrain.fork.as(ks)
+            }
+          }
       }
-      ZStream.mergeAll(sources.size)(processingStreams: _*)
+      a
     }
+    //      readSideProcessing.start(name, )
+    // processing should be start by process, process should
+//      val processingStreams = sources.map { stream =>
+//        stream.mapMPar(parallelism) { element =>
+//          val journalEntry = element.value
+//          val commit = element.commit
+//          val key = journalEntry.event.entityKey
+//          val event = journalEntry.event.payload
+//          logic(key, event) <* commit /* : RIO[Clock, Unit]*/
+//        }
+//      }
+//      ZStream.mergeAll(sources.size)(processingStreams: _*)
+//    }
   }
 
-  def readSide[ Id: Tag, Event: Tag, Offset: Tag](
-    name: String,
-    consumerId: ConsumerId,
-    tagging: Tagging[Id],
-    parallelism: Int,
-    logic: (Id, Event) => Task[Unit]
-  )(
-    implicit runtime: Runtime[ZEnv]
-  ): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
-    // simplify and then improve it
-    val killSwitch = KillSwitch(Task.unit)
-    readSideStream[Id, Event, Offset](name, consumerId, tagging, parallelism, logic)
-      .interruptWhen(killSwitch.shutdown)
-      .runDrain
-      .fork
-      .as(killSwitch)
-  }
-
-//  def readSide[Id: Tag, Event: Tag, Offset: Tag](
+//  def readSide[ Id: Tag, Event: Tag, Offset: Tag](
 //    name: String,
 //    consumerId: ConsumerId,
 //    tagging: Tagging[Id],
-//    parallelism: Int = 30,
+//    parallelism: Int,
 //    logic: (Id, Event) => Task[Unit]
 //  )(
 //    implicit runtime: Runtime[ZEnv]
 //  ): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
 //    // simplify and then improve it
-//    ZIO.accessM { layers =>
-//      val readSideProcessing = layers.get[ReadSideProcessing]
-//      val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
-//      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
-//        journal.eventsByTag(tag, consumerId)
-//      }
-//      // convert into process
-//      val interruptibleStreamsAndProcesses: ZIO[
-//        Any,
-//        Nothing,
-//        (ZStream[Any, Nothing, ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]], Seq[Process])
-//      ] = buildStreamAndProcesses(sources)
-//
-//      interruptibleStreamsAndProcesses.flatMap {
-//        case (streamOfStreams, processes) =>
-//          readSideProcessing.start(name, processes.toList).flatMap { ks =>
-//            import zio.duration._
-//            val streamsOfLogic: ZStream[Any with Clock, Throwable, Unit] = streamOfStreams.mapM { s =>
-//              val res: ZIO[Any with Clock, Throwable, Unit] = s
-//                .mapMPar(parallelism) { element =>
-//                  println(s"Processing element $element")
-//                  element.process { journalEntry =>
-//                    val key = journalEntry.event.entityKey
-//                    val event = journalEntry.event.payload
-//                    logic(key, event)
-//                  }
-//                }
-//                .runDrain
-//                .retry(Schedule.spaced(1.seconds))
-//              res
-//            }
-////            ZStream
-////              .mergeAll(processes.size)(streamsOfLogic)
-//            streamsOfLogic.take(1).runDrain.fork.as(ks)
-//          }
-//      }
-//    }
+//    val killSwitch = KillSwitch(Task.unit)
+//    readSideStream[Id, Event, Offset](name, consumerId, tagging, parallelism, logic)
+//      .interruptWhen(killSwitch.shutdown)
+//      .runDrain
+//      .fork
+//      .as(killSwitch)
 //  }
 
-//  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
-//    sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
-//  ) = {
-//    for {
-//      queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
-//      processes = sources.map { s =>
-//        Process {
-//          for {
-//            stopped <- zio.Promise.make[Throwable, Unit]
-//            fiber   <- (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork
-//          } yield RunningProcess(fiber.join.unit, stopped.succeed().unit)
-//        }
-//      }
-//    } yield (ZStream.fromQueue(queue), processes)
-//  }
+  //  def readSide[Id: Tag, Event: Tag, Offset: Tag](
+  //    name: String,
+  //    consumerId: ConsumerId,
+  //    tagging: Tagging[Id],
+  //    parallelism: Int,
+  //    logic: (Id, Event) => Task[Unit]
+  //  )(
+  //    implicit runtime: Runtime[ZEnv]
+  //  ): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  //    // simplify and then improve it
+  //    val killSwitch = KillSwitch(Task.unit)
+  //    readSideStream[Id, Event, Offset](name, consumerId, tagging, parallelism, logic)
+  //      .interruptWhen(killSwitch.shutdown)
+  //      .runDrain
+  //      .fork
+  //      .as(killSwitch)
+  //  }
+
+  //  def readSide[Id: Tag, Event: Tag, Offset: Tag](
+  //    name: String,
+  //    consumerId: ConsumerId,
+  //    tagging: Tagging[Id],
+  //    parallelism: Int = 30,
+  //    logic: (Id, Event) => Task[Unit]
+  //  )(
+  //    implicit runtime: Runtime[ZEnv]
+  //  ): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  //    // simplify and then improve it
+  //    ZIO.accessM { layers =>
+  //      val readSideProcessing = layers.get[ReadSideProcessing]
+  //      val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
+  //      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
+  //        journal.eventsByTag(tag, consumerId)
+  //      }
+  //      // convert into process
+  //      val interruptibleStreamsAndProcesses: ZIO[
+  //        Any,
+  //        Nothing,
+  //        (ZStream[Any, Nothing, ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]], Seq[Process])
+  //      ] = buildStreamAndProcesses(sources)
+  //
+  //      interruptibleStreamsAndProcesses.flatMap {
+  //        case (streamOfStreams, processes) =>
+  //          readSideProcessing.start(name, processes.toList).flatMap { ks =>
+  //            import zio.duration._
+  //            val streamsOfLogic: ZStream[Any with Clock, Throwable, Unit] = streamOfStreams.mapM { s =>
+  //              val res: ZIO[Any with Clock, Throwable, Unit] = s
+  //                .mapMPar(parallelism) { element =>
+  //                  element.process { journalEntry =>
+  //                    println(s"Processing element $element")
+  //                    val key = journalEntry.event.entityKey
+  //                    val event = journalEntry.event.payload
+  //                    logic(key, event)
+  //                  }
+  //                }
+  //                .runDrain
+  //                .retry(Schedule.spaced(1.seconds))
+  //              res
+  //            }
+  //            ZStream
+  //              .mergeAll(processes.size)(streamsOfLogic).runDrain.fork.as(ks)
+  //          }
+  //      }
+  //    }
+  //  }
+  //
+  //  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
+  //    sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
+  //  ) = {
+  //    var internalQueue = scala.collection.mutable.Queue[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]()
+
+  def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
+    sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
+  ) = {
+    for {
+      queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
+      processes = sources.map { s =>
+        Process {
+          for {
+            stopped <- zio.Promise.make[Throwable, Unit]
+            fiber   <- (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork
+          } yield RunningProcess(fiber.join.unit, stopped.succeed().unit)
+        }
+      }
+    } yield (ZStream.fromQueue(queue), processes)
+  }
 
   object Ops {
 

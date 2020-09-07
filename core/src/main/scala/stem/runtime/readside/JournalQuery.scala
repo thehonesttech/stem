@@ -62,17 +62,3 @@ object JournalStores {
   }
 }
 
-object Stores {
-
-  def live[K, E, S]: Task[Stores[K, E, S]] = ???
-
-  def memory[K, E, S]: Task[Stores[K, E, S]] = ???
-
-}
-
-case class Stores[K, E, S](
-  eventJournalStore: EventJournal[K, E],
-  committableJournalQueryStore: CommittableJournalQuery[Long, K, E],
-  memoryEventJournalOffsetStore: KeyValueStore[K, Long],
-  snapshotKeyValueStore: KeyValueStore[K, Versioned[S]],
-)
