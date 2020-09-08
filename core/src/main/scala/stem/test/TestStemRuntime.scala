@@ -10,14 +10,14 @@ import stem.readside.ReadSideProcessing
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer, snapshotStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
-import stem.snapshot.{MemoryKeyValueStore, Snapshotting}
+import stem.snapshot.Snapshotting
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
 import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{duration, Chunk, Has, Queue, RIO, Runtime, Tag, Task, UIO, ZEnv, ZIO, ZLayer, ZManaged}
+import zio.{duration, Chunk, Has, Queue, RIO, Runtime, Tag, Task, UIO, ZEnv, ZIO, ZLayer}
 
 object TestStemRuntime {
 
@@ -100,7 +100,7 @@ object TestStemRuntime {
         Event
       ]))
 
-    zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ StemApp
+    zio.test.environment.TestEnvironment.live ++ TestConsole.silent ++ TestClock.any ++ StemApp
       .stubCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory
   }
 

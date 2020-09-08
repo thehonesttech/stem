@@ -104,6 +104,6 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   private def env = {
     val testCompLayer = testComponentsLayer ++ kafkaPusherLayer
-    TestConsole.silent ++ testCompLayer >+> (LedgerGrpcService.live ++ LedgerReadSideProcessor.live ++ InboundMessageHandling.live)
+    testCompLayer >+> (LedgerGrpcService.live ++ LedgerReadSideProcessor.live ++ InboundMessageHandling.live)
   }
 }
