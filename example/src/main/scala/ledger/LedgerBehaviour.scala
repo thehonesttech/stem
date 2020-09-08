@@ -41,7 +41,6 @@ object LedgerServer extends ServerMain {
 
   type LedgerCombinator = AlgebraCombinators[Int, LedgerEvent, String]
   val readSidePollingInterval: Duration = 100.millis
-  private val stemRuntimeLayer = StemApp.stemStores[String, LedgerEvent]() ++ StemApp.actorSettings("System")
   private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
     ZLayer.succeed(
       KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
@@ -49,6 +48,7 @@ object LedgerServer extends ServerMain {
         ConsumerSettings(List("0.0.0.0"))
       )
     )
+  private val stemRuntimeLayer = StemApp.stemStores[String, LedgerEvent]() ++ StemApp.actorSettings("System")
 
   private val ledgerEntity = stemRuntimeLayer to LedgerEntity.live
   private val kafkaMessageHandling = ZEnv.live and kafkaConfiguration and ledgerEntity to InboundMessageHandling.liveLayer

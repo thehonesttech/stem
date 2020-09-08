@@ -1,20 +1,17 @@
 package stem.journal
 
-import java.time.Instant
-
 import stem.data.EventTag
 import stem.runtime.readside.JournalQuery
 import zio._
 import zio.clock.Clock
-import zio.stream.ZStream
 import zio.duration.Duration
+import zio.stream.ZStream
 
 //TODO improve performance since they are not great
 class MemoryEventJournal[Key, Event](
   pollingInterval: Duration,
   internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],
-  internalQueue: Queue[(Key, Event)],
-  lastOffsetProcessed: Ref[Option[Long]]
+  internalQueue: Queue[(Key, Event)]
 ) extends EventJournal[Key, Event]
     with JournalQuery[Long, Key, Event] {
 
@@ -64,15 +61,16 @@ class MemoryEventJournal[Key, Event](
   }
 
   override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Throwable, JournalEntry[Long, Key, Event]] = {
-    // store in memory last offset returned in order to call it from the polling interval
-    stream.Stream.fromSchedule(Schedule.fixed(pollingInterval)) *> ZStream
-      .fromEffect(lastOffsetProcessed.get)
-      .flatMap(
-        lastOffset =>
-          currentEventsByTag(tag, lastOffset.orElse(offset)).mapM { event =>
-            lastOffsetProcessed.set(Some(event.offset)).as(event)
-        }
-      )
+    ZStream.fromEffect(Ref.make[Option[Long]](None)).flatMap { lastOffsetProcessed =>
+      ZStream.fromSchedule(Schedule.fixed(pollingInterval)) *> ZStream
+        .fromEffect(lastOffsetProcessed.get)
+        .flatMap(
+          lastOffset =>
+            currentEventsByTag(tag, lastOffset.orElse(offset)).mapM { event =>
+              lastOffsetProcessed.set(Some(event.offset)).as(event)
+            }
+        )
+    }
   }
 
   override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
@@ -100,8 +98,7 @@ object MemoryEventJournal {
   def make[Key, Event](pollingInterval: Duration): ZIO[Any, Nothing, MemoryEventJournal[Key, Event]] = {
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
-      lastOffset <- Ref.make[Option[Long]](None)
       queue    <- Queue.unbounded[(Key, Event)]
-    } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue, lastOffset)
+    } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue)
   }
 }
