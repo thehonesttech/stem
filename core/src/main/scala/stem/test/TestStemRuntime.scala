@@ -85,8 +85,8 @@ object TestStemRuntime {
     val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
     val snapshotting = snapshotStoreLayer[Key, State](snapshotInterval)
     val memoryAndSnapshotting = memoryEventJournalLayer ++ snapshotting
-    val stemtityAndProbe = memoryEventJournalLayer ++ ((memoryAndSnapshotting >>> StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler))
-      ++ (memoryAndSnapshotting >>> stemtity[
+    val stemtityAndProbe = memoryAndSnapshotting >+> (StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler)
+      ++ stemtity[
         Key,
         Algebra,
         State,
@@ -95,10 +95,10 @@ object TestStemRuntime {
       ](
         tagging,
         eventSourcedBehaviour
-      ).toLayer) ++ (memoryEventJournalLayer >>> memoryCommittableJournalStore[
+      ).toLayer ++ memoryCommittableJournalStore[
         Key,
         Event
-      ]))
+      ])
 
     zio.test.environment.TestEnvironment.live ++ TestConsole.silent ++ TestClock.any ++ StemApp
       .stubCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory

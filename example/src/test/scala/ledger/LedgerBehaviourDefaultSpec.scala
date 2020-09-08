@@ -20,7 +20,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   def spec =
     suite("LedgerSpec")(
-      suite("Ledger stemtity with memory stemtity")(testM("receives commands, produces events and updates state") {
+      suite("Ledger stemtity")(testM("receives commands, produces events and updates state") {
         val key = "key"
         val keyOther = "key2"
         (for {
