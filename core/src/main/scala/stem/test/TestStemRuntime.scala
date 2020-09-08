@@ -7,9 +7,9 @@ import stem.data._
 import stem.journal.MemoryEventJournal
 import stem.readside.ReadSideProcessing
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
-import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
+import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer, snapshotStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
-import stem.snapshot.Snapshotting
+import stem.snapshot.{MemoryKeyValueStore, Snapshotting}
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
@@ -40,12 +40,15 @@ object TestStemRuntime {
   def stemtityAndReadSideLayer[Key: Tag, Algebra: Tag, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
-    readSidePollingInterval: duration.Duration = 100.millis
+    readSidePollingInterval: duration.Duration = 100.millis,
+    snapshotInterval: Int = 2
   )(
     implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ) = {
     val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
-    val stemtityAndProbe = memoryEventJournalLayer >+> (StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler) ++ stemtity[
+    val snapshotting = snapshotStoreLayer[Key, State](2)
+    val stemtityAndProbe = (memoryEventJournalLayer ++ snapshotting) >+> (StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler)
+      ++ stemtity[
         Key,
         Algebra,
         State,
@@ -106,6 +109,7 @@ object StemtityProbe {
 
   case class KeyedProbeOperations[State, Event](
     state: Task[State],
+    stateFromSnapshot: Task[Option[Versioned[State]]],
     events: Task[List[Event]],
     eventStream: ZStream[Any, Throwable, Event]
   )
@@ -119,24 +123,28 @@ object StemtityProbe {
     def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event]
   }
 
-  def live[Key: Tag, State: Tag, Event: Tag](eventHandler: Fold[State, Event]) = ZLayer.fromService { (memoryEventJournal: MemoryEventJournal[Key, Event]) =>
-    new Service[Key, State, Event] {
+  def live[Key: Tag, State: Tag, Event: Tag](eventHandler: Fold[State, Event]) = ZLayer.fromServices {
+    (memoryEventJournal: MemoryEventJournal[Key, Event], snapshotStore: Snapshotting[Key, State]) =>
+      new Service[Key, State, Event] {
 
-      def apply(key: Key) = KeyedProbeOperations(
-        state = state(key),
-        events = events(key),
-        eventStream = eventStream(key)
-      )
-      private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
-      private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
-      private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
+        def apply(key: Key) = KeyedProbeOperations(
+          state = state(key),
+          stateFromSnapshot = stateFromSnapshot(key),
+          events = events(key),
+          eventStream = eventStream(key)
+        )
+        private val stateFromSnapshot: Key => Task[Option[Versioned[State]]] = key => snapshotStore.load(key)
+        private val state: Key => Task[State] = key => events(key).flatMap(list => eventHandler.run(Chunk.fromIterable(list)))
+        private val events: Key => Task[List[Event]] = key => memoryEventJournal.getAppendedEvent(key)
+        private val eventStream: Key => ZStream[Any, Throwable, Event] = key => memoryEventJournal.getAppendedStream(key)
 
-      def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
-        memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
+        def eventsFromReadSide(tag: EventTag): RIO[Clock, List[Event]] =
+          memoryEventJournal.currentEventsByTag(tag, None).runCollect.map(_.toList.map(_.event.payload))
 
-      def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
-        memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
-    }
+        def eventStreamFromReadSide(tag: EventTag): ZStream[Clock, Throwable, Event] =
+          memoryEventJournal.eventsByTag(tag, None).map(_.event.payload)
+
+      }
 
   }
 

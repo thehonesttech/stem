@@ -3,7 +3,7 @@ package stem.runtime.readside
 import stem.data._
 import stem.journal.{JournalEntry, MemoryEventJournal}
 import stem.runtime.KeyValueStore
-import stem.snapshot.KeyValueStore
+import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.{Stream, ZStream}
@@ -54,6 +54,9 @@ object JournalStores {
   def memoryJournalStoreLayer[K: Tag, E: Tag](pollingInterval: duration.Duration): ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
     MemoryEventJournal.make[K, E](pollingInterval).toLayer
   }
+
+  def snapshotStoreLayer[K: Tag, State: Tag](pollingInterval: Int = 10): ZLayer[Any, Throwable, Has[Snapshotting[K, State]]] =
+    MemoryKeyValueStore.make[K, Versioned[State]].map(Snapshotting.eachVersion(pollingInterval, _)).toLayer
 
   def memoryCommittableJournalStore[K: Tag, E: Tag]: ZLayer[Any with Has[MemoryEventJournal[K, E]], Nothing, Has[CommittableJournalQuery[Long, K, E]]] = {
     ZLayer.fromServiceM { (eventJournalStore: MemoryEventJournal[K, E]) =>
