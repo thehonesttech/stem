@@ -12,6 +12,7 @@ import stem.data.{StemProtocol, Tagging, Versioned}
 import stem.journal.EventJournal
 import stem.runtime.akka.serialization.Message
 import stem.runtime.{AlgebraCombinatorConfig, KeyValueStore}
+import stem.snapshot.Snapshotting
 import zio.{Has, IO, Runtime, Task, ZEnv, ZIO}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -37,7 +38,7 @@ object StemRuntime {
           memoryEventJournalOffsetStore,
           tagging,
           memoryEventJournal,
-          snapshotKeyValueStore
+          Snapshotting.eachVersion(2, snapshotKeyValueStore)
         )
         algebra <- buildStemtity(typeName, eventSourcedBehaviour, combinators)
       } yield algebra
@@ -83,9 +84,9 @@ object StemRuntime {
     KeyAlgebraSender.keyToAlgebra(
       (key: Key, bytes: BitVector) => {
         IO.fromFuture { _ =>
-            implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
-            shardRegion ? KeyedCommand(keyEncoder(key), bytes)
-          }
+          implicit val askTimeout: Timeout = Timeout(settings.askTimeout)
+          shardRegion ? KeyedCommand(keyEncoder(key), bytes)
+        }
       },
       eventSourcedBehaviour.errorHandler
     )

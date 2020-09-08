@@ -9,6 +9,7 @@ import stem.readside.ReadSideProcessing
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
+import stem.snapshot.Snapshotting
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
@@ -31,7 +32,7 @@ object TestStemRuntime {
         memoryEventJournalOffsetStore,
         tagging,
         memoryEventJournal,
-        snapshotKeyValueStore
+        Snapshotting.eachVersion(2, snapshotKeyValueStore)
       )
     } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
   }

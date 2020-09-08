@@ -24,20 +24,20 @@ object AlgebraCombinatorConfig {
         eventJournal: EventJournal[Key, Event],
         snapshotting: Snapshotting[Key, State]
       ) =>
-        AlgebraCombinatorConfig(eventJournalOffsetStore, tagging, eventJournal, snapshotting)
+        memory(eventJournalOffsetStore, tagging, eventJournal, snapshotting)
     }
 
   def memory[Key: Tag, State: Tag, Event: Tag](
     memoryEventJournalOffsetStore: KeyValueStore[Key, Long],
     tagging: Tagging[Key],
     memoryEventJournal: EventJournal[Key, Event],
-    snapshotKeyValueStore: KeyValueStore[Key, Versioned[State]]
+    snapshotting: Snapshotting[Key, State]
   ): AlgebraCombinatorConfig[Key, State, Event] = {
     new AlgebraCombinatorConfig(
       memoryEventJournalOffsetStore,
       tagging,
       memoryEventJournal,
-      Snapshotting.eachVersion(10, snapshotKeyValueStore)
+      snapshotting
     )
   }
 
