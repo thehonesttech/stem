@@ -75,10 +75,11 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
       events: NonEmptyChunk[Event] = NonEmptyChunk(es, other: _*)
       currentState <- read
       newState     <- userBehaviour.init(currentState).run(events)
-      _            <- state.set(Some(newState))
-      _            <- eventJournal.append(key, offset, events).provide(tagging)
-      _            <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState))
-      _            <- eventJournalOffsetStore.setValue(key, offset + events.size)
+      _ = println(s"NewState is $newState for key $key")
+      _ <- state.set(Some(newState))
+      _ <- eventJournal.append(key, offset, events).provide(tagging)
+      _ <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState))
+      _ <- eventJournalOffsetStore.setValue(key, offset + events.size)
     } yield ()
   }
 

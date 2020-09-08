@@ -7,15 +7,16 @@ import zio.Schedule.Decision
 import zio.{Tag, ZLayer, _}
 import zio.blocking.Blocking
 import zio.clock.Clock
-import zio.console.{Console, putStrLn}
+import zio.console.{putStrLn, Console}
 import zio.duration.durationInt
 import zio.kafka.consumer.{Consumer, ConsumerSettings, Subscription}
 import zio.kafka.producer.{Producer, ProducerSettings}
 import zio.kafka.serde._
+import zio.stream.ZStream
 
 class KafkaConsumer[K: Tag, V: Tag](
   consumerConfiguration: KafkaConsumerConfig[K, V]
-) {
+) extends MessageConsumer[K, V] {
   type RecordProducer = Producer[Any, K, V]
   val consumerManaged: ZManaged[Clock with Blocking, Throwable, Consumer.Service] =
     Consumer.make(consumerConfiguration.consumerSettings)
@@ -30,8 +31,7 @@ class KafkaConsumer[K: Tag, V: Tag](
       case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
     })
 
-  def subscribe[Reject](fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, Unit] = {
-
+  def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit] = {
     Consumer
       .subscribeAnd(Subscription.topics(consumerConfiguration.topic))
       .plainStream(consumerConfiguration.keySerde, consumerConfiguration.valueSerde)
@@ -41,9 +41,26 @@ class KafkaConsumer[K: Tag, V: Tag](
         val value = record.value
         fn(key, value)
       }
+  }
+
+  def subscribe(fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, SubscriptionKillSwitch] = {
+    val shutdown = Task.unit
+    messageStream(fn)
+      .interruptWhen(shutdown)
       .runDrain
       .retry(scheduleEvery5Seconds)
+      .as(SubscriptionKillSwitch(shutdown))
   }
+}
+
+case class SubscriptionKillSwitch(shutdown: Task[Unit])
+
+trait MessageConsumer[K, V] {
+
+  def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit]
+
+  // TODO do not override subscribe but only messageStream
+  def subscribe(fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, SubscriptionKillSwitch]
 
 }
 
@@ -66,7 +83,7 @@ case class KafkaConsumerConfiguration[K: Tag, V: Tag](
 
 case class KafkaGrpcConsumerConfiguration[
   K <: GeneratedMessage: GeneratedMessageCompanion: Tag,
-  V <: GeneratedSealedOneof : Tag,
+  V <: GeneratedSealedOneof: Tag,
   L <: GeneratedMessage: GeneratedMessageCompanion
 ](topic: String, consumerSettings: ConsumerSettings)(implicit val typeMapper: TypeMapper[L, V])
     extends KafkaConsumerConfig[K, V] {
@@ -74,18 +91,18 @@ case class KafkaGrpcConsumerConfiguration[
   val valueSerde: Serde[Any, V] = new GrpcSealedSerde[V, L]
 }
 
-class GrpcSealedSerde[T <: GeneratedSealedOneof, L <: GeneratedMessage: GeneratedMessageCompanion](implicit val typeMapper: TypeMapper[L, T]) extends Serde[Any, T] {
+class GrpcSealedSerde[T <: GeneratedSealedOneof, L <: GeneratedMessage: GeneratedMessageCompanion](implicit val typeMapper: TypeMapper[L, T])
+    extends Serde[Any, T] {
   def deserialize(topic: String, headers: Headers, data: Array[Byte]): RIO[Any, T] = {
-    RIO.succeed(implicitly[TypeMapper[ L, T]].toCustom(implicitly[GeneratedMessageCompanion[L]].parseFrom(data)))
+    RIO.succeed(implicitly[TypeMapper[L, T]].toCustom(implicitly[GeneratedMessageCompanion[L]].parseFrom(data)))
   }
 
   def serialize(topic: String, headers: Headers, value: T): RIO[Any, Array[Byte]] = {
-    RIO.succeed(implicitly[GeneratedMessageCompanion[L]].toByteArray(implicitly[TypeMapper[ L, T]].toBase(value)))
+    RIO.succeed(implicitly[GeneratedMessageCompanion[L]].toByteArray(implicitly[TypeMapper[L, T]].toBase(value)))
   }
 
   def configure(props: Map[String, AnyRef], isKey: Boolean): Task[Unit] = Task.unit
 }
-
 
 class GrpcSerde[T <: GeneratedMessage: GeneratedMessageCompanion] extends Serde[Any, T] {
   def deserialize(topic: String, headers: Headers, data: Array[Byte]): RIO[Any, T] =
