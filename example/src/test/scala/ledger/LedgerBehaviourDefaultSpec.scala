@@ -75,7 +75,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             (_, probe)   <- ledgerStemtityAndProbe
             kafka        <- kafkaClient
             _            <- kafka.send(TestMessage(LedgerId("kafkaKey"), Authorization(accountId, BigDecimal(10), "idempotency1")))
-            _            <- TestClock.adjust(0.millis) // we need the tick to trigger the kafka processing (double check why)
+            _            <- TestClock.adjust(1.millis) // we need the tick to trigger the kafka processing (double check why)
             stateInitial <- probe(accountId).state
             _            <- TestClock.adjust(200.millis)
             console      <- TestConsole.output
