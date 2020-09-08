@@ -23,16 +23,16 @@ object TestStemRuntime {
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
   )(
     implicit protocol: StemProtocol[Algebra, State, Event, Reject]
-  ): ZIO[Has[MemoryEventJournal[Key, Event]], Throwable, Key => Algebra] = ZIO.accessM { layer =>
-    val memoryEventJournal = layer.get
+  ): ZIO[Has[MemoryEventJournal[Key, Event]] with Has[Snapshotting[Key, State]], Throwable, Key => Algebra] = ZIO.accessM { layer =>
+    val memoryEventJournal = layer.get[MemoryEventJournal[Key, Event]]
+    val snapshotting = layer.get[Snapshotting[Key, State]]
     for {
       memoryEventJournalOffsetStore <- KeyValueStore.memory[Key, Long]
-      snapshotKeyValueStore         <- KeyValueStore.memory[Key, Versioned[State]]
       baseAlgebraConfig = AlgebraCombinatorConfig.memory[Key, State, Event](
         memoryEventJournalOffsetStore,
         tagging,
         memoryEventJournal,
-        Snapshotting.eachVersion(2, snapshotKeyValueStore)
+        snapshotting
       )
     } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
   }
@@ -47,8 +47,9 @@ object TestStemRuntime {
   ) = {
     val memoryEventJournalLayer = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
     val snapshotting = snapshotStoreLayer[Key, State](2)
-    val stemtityAndProbe = (memoryEventJournalLayer ++ snapshotting) >+> (StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler)
-      ++ stemtity[
+    val memoryAndSnapshotting = memoryEventJournalLayer ++ snapshotting
+    val stemtityAndProbe = memoryEventJournalLayer ++ ((memoryAndSnapshotting >>> StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler))
+      ++ (memoryAndSnapshotting >>> stemtity[
         Key,
         Algebra,
         State,
@@ -57,10 +58,10 @@ object TestStemRuntime {
       ](
         tagging,
         eventSourcedBehaviour
-      ).toLayer ++ memoryCommittableJournalStore[
+      ).toLayer) ++ (memoryEventJournalLayer >>> memoryCommittableJournalStore[
         Key,
         Event
-      ])
+      ]))
     zio.test.environment.TestEnvironment.live ++ TestConsole.any ++ TestClock.any ++ StemApp
       .stubCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory
   }

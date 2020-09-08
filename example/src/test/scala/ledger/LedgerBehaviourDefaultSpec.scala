@@ -4,6 +4,7 @@ import ledger.Converters.toLedgerBigDecimal
 import ledger.LedgerEntity.LedgerCommandHandler
 import ledger.communication.grpc.service.{LockReply, LockRequest, ZioService}
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent}
+import stem.data.Versioned
 import stem.runtime.akka.EventSourcedBehaviour
 import stem.test.StemtityProbe
 import stem.test.TestStemRuntime._
@@ -26,20 +27,24 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           result                      <- ledgers(key).lock(BigDecimal(10), "test1")
           events                      <- probe(key).events
           initialState                <- probe(key).state
+          stateFromSnapshot           <- probe(key).stateFromSnapshot
           _                           <- ledgers(key).lock(BigDecimal(12), "test2")
           events2                     <- probe(key).events
           updatedState                <- probe(key).state
-          _                           <- ledgers(keyOther).lock(BigDecimal(5), "test3")
+          stateAfter2Events           <- probe(key).stateFromSnapshot
+          _                           <- ledgers(keyOther).lock(BigDecimal(5), "test4")
           initialStateForSecondEntity <- probe(keyOther).state
         } yield {
           assert(result)(equalTo(Allowed)) &&
           assert(events)(hasSameElements(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "test1")))) &&
           assert(initialState)(equalTo(1)) &&
+          assert(stateFromSnapshot)(equalTo(None)) &&
           assert(events2)(
             hasSameElements(List(AmountLocked(toLedgerBigDecimal(BigDecimal(10)), "test1"), AmountLocked(toLedgerBigDecimal(BigDecimal(12)), "test2")))
           ) &&
           assert(updatedState)(equalTo(2)) &&
-          assert(initialStateForSecondEntity)(equalTo(1))
+          assert(initialStateForSecondEntity)(equalTo(1)) &&
+          assert(stateAfter2Events)(equalTo(Some(Versioned(2, updatedState))))
         }).provideLayer(testComponentsLayer)
       }),
       suite("End to end test with memory implementations")(
@@ -68,7 +73,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   private def testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
     LedgerEntity.tagging,
-    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler)
+    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler),
+    snapshotInterval = 2
   )
 
   private def env = {
