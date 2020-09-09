@@ -39,7 +39,7 @@ class KafkaConsumer[K: Tag, V: Tag](
       .mapM { record =>
         val key = record.key
         val value = record.value
-        fn(key, value)
+        ZIO.accessM[Clock with Blocking](_ => fn(key, value))
       }
   }
 

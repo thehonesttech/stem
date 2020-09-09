@@ -34,7 +34,7 @@ object TestStemRuntime {
     // TODO apply the same strategy for stemtity probes
     def memory[K: Tag, V: Tag]: ZLayer[Any, Nothing, Has[MessageConsumer[K, V]] with Has[StubKafkaPusher[K, V]]] = {
       val effect: ZIO[Any, Nothing, Has[MessageConsumer[K, V]] with Has[StubKafkaPusher[K, V]]] = Queue.unbounded[TestMessage[K, V]].map { queue =>
-        val stream = ZStream.fromQueue(queue)
+        val stream = ZStream.fromQueueWithShutdown(queue)
 
         val messageConsumer = new MessageConsumer[K, V] with StubKafkaPusher[K, V] {
           override def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit] = stream.mapM { message =>
@@ -123,12 +123,12 @@ object TestStemRuntime {
                 .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig)
                 .flatMap { combinator =>
                   val uioCombinator = UIO.succeed(combinator)
-                  uioCombinator <* ZIO.effectTotal {
+                  ZIO.effectTotal {
                     combinatorMap = combinatorMap + (key -> uioCombinator)
-                  }
+                  } *> uioCombinator
                 }
           }
-        } yield (combinatorRetrieved))
+        } yield combinatorRetrieved)
 
         protocol
           .server(eventSourcedBehaviour.algebra, errorHandler)
