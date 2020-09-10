@@ -14,8 +14,9 @@ import zio.kafka.producer.{Producer, ProducerSettings}
 import zio.kafka.serde._
 import zio.stream.ZStream
 
-class KafkaConsumer[K: Tag, V: Tag](
-  consumerConfiguration: KafkaConsumerConfig[K, V]
+class KafkaMessageConsumer[K: Tag, V: Tag](
+  consumerConfiguration: KafkaConsumerConfig[K, V],
+  logic: (K, V) => Task[Unit]
 ) extends MessageConsumer[K, V] {
   type RecordProducer = Producer[Any, K, V]
   val consumerManaged: ZManaged[Clock with Blocking, Throwable, Consumer.Service] =
@@ -24,14 +25,7 @@ class KafkaConsumer[K: Tag, V: Tag](
   val consumer: ZLayer[Clock with Blocking, Throwable, Consumer] =
     ZLayer.fromManaged(consumerManaged)
 
-  private val scheduleEvery5Seconds = Schedule
-    .spaced(5.seconds)
-    .onDecision({
-      case Decision.Done(_)                 => putStrLn(s"Reconnection successfull")
-      case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
-    })
-
-  def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit] = {
+  val messageStream: ZStream[Clock with Blocking, Throwable, Unit] = {
     Consumer
       .subscribeAnd(Subscription.topics(consumerConfiguration.topic))
       .plainStream(consumerConfiguration.keySerde, consumerConfiguration.valueSerde)
@@ -39,17 +33,33 @@ class KafkaConsumer[K: Tag, V: Tag](
       .mapM { record =>
         val key = record.key
         val value = record.value
-        ZIO.accessM[Clock with Blocking](_ => fn(key, value))
+        ZIO.accessM[Clock with Blocking](_ => logic(key, value))
       }
   }
+}
 
-  def subscribe(fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, SubscriptionKillSwitch] = {
-    val shutdown = Task.unit
-    messageStream(fn)
-      .interruptWhen(shutdown)
-      .runDrain
-      .retry(scheduleEvery5Seconds)
-      .as(SubscriptionKillSwitch(shutdown))
+object MessageConsumerSubscriber {
+
+  type MessageConsumerSubscriber = Has[MessageConsumerSubscriber.Service]
+
+  trait Service {
+    def consumeForever: ZIO[Console with Clock with Blocking, Nothing, SubscriptionKillSwitch]
+  }
+
+  val live = ZIO.access[ZStream[Clock with Blocking, Throwable, Unit]] { messageStream =>
+    new Service {
+      private val scheduleEvery5Seconds = Schedule
+        .spaced(5.seconds)
+        .onDecision({
+          case Decision.Done(_)                 => putStrLn(s"Reconnection successfull")
+          case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
+        })
+
+      val consumeForever: ZIO[Console with Clock with Blocking, Nothing, SubscriptionKillSwitch] = {
+        val killSwitch = SubscriptionKillSwitch(Task.unit)
+        messageStream.interruptWhen(killSwitch.shutdown).runDrain.retry(scheduleEvery5Seconds).fork.as(killSwitch)
+      }
+    }
   }
 }
 
@@ -57,10 +67,7 @@ case class SubscriptionKillSwitch(shutdown: Task[Unit])
 
 trait MessageConsumer[K, V] {
 
-  def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit]
-
-  // TODO do not override subscribe but only messageStream
-  def subscribe(fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, SubscriptionKillSwitch]
+  def messageStream: ZStream[Clock with Blocking, Throwable, Unit]
 
 }
 
@@ -114,9 +121,9 @@ class GrpcSerde[T <: GeneratedMessage: GeneratedMessageCompanion] extends Serde[
   def configure(props: Map[String, AnyRef], isKey: Boolean): Task[Unit] = Task.unit
 }
 
-object KafkaConsumer {
-  def apply[K: Tag, V: Tag](consumerConfiguration: KafkaConsumerConfig[K, V]): KafkaConsumer[K, V] =
-    new KafkaConsumer(consumerConfiguration)
+object KafkaMessageConsumer {
+  def apply[K: Tag, V: Tag](consumerConfiguration: KafkaConsumerConfig[K, V], logic: (K, V) => Task[Unit]): KafkaMessageConsumer[K, V] =
+    new KafkaMessageConsumer(consumerConfiguration, logic)
 }
 
 class KafkaProducer[K: Tag, V: Tag](

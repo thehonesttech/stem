@@ -12,7 +12,14 @@ import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent, LockReleas
 import ledger.messages.messages.{Authorization, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import stem.StemApp
-import stem.communication.kafka.{KafkaConsumer, KafkaConsumerConfig, KafkaGrpcConsumerConfiguration, MessageConsumer, SubscriptionKillSwitch}
+import stem.communication.kafka.{
+  KafkaConsumerConfig,
+  KafkaGrpcConsumerConfiguration,
+  KafkaMessageConsumer,
+  MessageConsumer,
+  MessageConsumerSubscriber,
+  SubscriptionKillSwitch
+}
 import stem.communication.macros.RpcMacro
 import stem.communication.macros.annotations.MethodId
 import stem.data._
@@ -22,12 +29,14 @@ import stem.runtime.Fold
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka._
 import stem.runtime.readside.CommittableJournalQuery
+import stem.test.TestStemRuntime.TestKafkaMessageConsumer
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
 import zio.duration.{durationInt, Duration}
 import zio.kafka.consumer.ConsumerSettings
-import zio.{console, Has, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.stream.ZStream
+import zio.{console, Has, Managed, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer, ZManaged}
 
 sealed trait LockResponse
 
@@ -49,9 +58,11 @@ object LedgerServer extends ServerMain {
   private val stemRuntimeLayer = StemApp.stemStores[String, LedgerEvent]() ++ StemApp.actorSettings("System")
 
   private val ledgerEntity = stemRuntimeLayer to LedgerEntity.live
-  private val kafkaConsumer: ZLayer[Any, Nothing, Has[MessageConsumer[LedgerId, LedgerInstructionsMessage]]] = kafkaConfiguration >>> ZIO
-      .access[Has[ConsumerConfiguration]](layer => KafkaConsumer(layer.get))
-      .toLayer
+  private val kafkaConsumer = (ledgerEntity ++ kafkaConfiguration) >>>
+    InboundMessageHandling.messageHandling.flatMap { logic =>
+      ZIO
+        .access[Has[ConsumerConfiguration]](layer => KafkaMessageConsumer(layer.get, logic): MessageConsumer[LedgerId, LedgerInstructionsMessage])
+    }.toLayer
   private val kafkaMessageHandling = ZEnv.live and kafkaConsumer and ledgerEntity to InboundMessageHandling.live
   private val readSideProcessing = stemRuntimeLayer to ReadSideProcessing.live
   private val readSideProcessor = (ZEnv.live and readSideProcessing and stemRuntimeLayer) to LedgerReadSideProcessor.live
@@ -172,15 +183,24 @@ object InboundMessageHandling {
       }
     }
 
-  val subscription: ZIO[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerMessageConsumer], Throwable, SubscriptionKillSwitch] =
-    ZIO.accessM { layers =>
-      val messageConsumer = layers.get[MessageConsumer[LedgerId, LedgerInstructionsMessage]]
-      messageHandling.flatMap(messageConsumer.subscribe)
-    }
+  val test: ZLayer[Has[Ledgers], Throwable, Has[MessageConsumer[LedgerId, LedgerInstructionsMessage]] with Has[
+    TestKafkaMessageConsumer[LedgerId, LedgerInstructionsMessage]
+  ]] = {
+    messageHandling.toLayer >>> TestKafkaMessageConsumer
+      .memory[LedgerId, LedgerInstructionsMessage]
+  }
 
-  val live: ZLayer[Clock with Blocking with Console with Has[Ledgers] with Has[LedgerMessageConsumer], Throwable, Has[
-    SubscriptionKillSwitch
-  ]] = ZLayer.fromAcquireRelease(subscription)(ks => ks.shutdown.exitCode)
+  val live: ZLayer[Console with Clock with Blocking with Has[LedgerMessageConsumer], Nothing, Has[SubscriptionKillSwitch]] =
+    ZLayer.fromManaged(
+      Managed.make(
+        for {
+          stream     <- ZIO.service[LedgerMessageConsumer]
+          service    <- MessageConsumerSubscriber.live.provide(stream.messageStream)
+          killSwitch <- service.consumeForever
+        } yield killSwitch
+      )(_.shutdown.exitCode)
+    )
+
 }
 
 object LedgerGrpcService {

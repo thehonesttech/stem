@@ -2,7 +2,7 @@ package stem.test
 
 import scodec.bits.BitVector
 import stem.StemApp
-import stem.communication.kafka.{MessageConsumer, SubscriptionKillSwitch}
+import stem.communication.kafka.MessageConsumer
 import stem.data.AlgebraCombinators.Combinators
 import stem.data._
 import stem.journal.MemoryEventJournal
@@ -13,43 +13,55 @@ import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraC
 import stem.snapshot.Snapshotting
 import zio.blocking.Blocking
 import zio.clock.Clock
-import zio.console.Console
 import zio.duration.durationInt
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{duration, Chunk, Has, Queue, RIO, Runtime, Tag, Task, UIO, ZEnv, ZIO, ZLayer}
+import zio.{duration, Chunk, Fiber, Has, Queue, RIO, Runtime, Tag, Task, UIO, URIO, ZEnv, ZIO, ZLayer}
 
 object TestStemRuntime {
 
-  trait StubKafkaPusher[K, V] {
-    def send(message: TestMessage[K, V]): Task[Unit]
+  trait TestKafkaMessageConsumer[K, V] {
+    def send(message: TestMessage[K, V]*): Task[Unit]
+
+    def sendAndConsume(message: TestMessage[K, V]*): ZIO[Clock with Blocking, Throwable, Unit]
+
+    def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]]
   }
 
-  type TestMessageConsumer[K, V] = StubKafkaPusher[K, V]
+  type TestKafka[K, V] = TestKafkaMessageConsumer[K, V]
 
   case class TestMessage[K, V](key: K, value: V)
 
-  object StubKafkaPusher {
+  object TestKafkaMessageConsumer {
 
     // TODO apply the same strategy for stemtity probes
-    def memory[K: Tag, V: Tag]: ZLayer[Any, Nothing, Has[MessageConsumer[K, V]] with Has[StubKafkaPusher[K, V]]] = {
-      val effect: ZIO[Any, Nothing, Has[MessageConsumer[K, V]] with Has[StubKafkaPusher[K, V]]] = Queue.unbounded[TestMessage[K, V]].map { queue =>
-        val stream = ZStream.fromQueue(queue)
+    def memory[K: Tag, V: Tag]: ZLayer[Has[(K, V) => Task[Unit]], Nothing, Has[MessageConsumer[K, V]] with Has[TestKafkaMessageConsumer[K, V]]] = {
+      val effect: ZIO[Has[(K, V) => Task[Unit]], Nothing, Has[MessageConsumer[K, V]] with Has[TestKafkaMessageConsumer[K, V]]] =
+        ZIO.accessM[Has[(K, V) => Task[Unit]]] { layer =>
+          val logic = layer.get
+          Queue.unbounded[TestMessage[K, V]].map { queue =>
+            val messageConsumer = new MessageConsumer[K, V] with TestKafkaMessageConsumer[K, V] {
+              val messageStream: ZStream[Clock with Blocking, Throwable, Unit] = ZStream.fromQueue(queue).mapM { message =>
+                logic(message.key, message.value)
+              }
 
-        val messageConsumer = new MessageConsumer[K, V] with StubKafkaPusher[K, V] {
-          override def messageStream(fn: (K, V) => Task[Unit]): ZStream[Clock with Blocking, Throwable, Unit] = stream.mapM { message =>
-            fn(message.key, message.value)
+              override def send(messages: TestMessage[K, V]*): Task[Unit] = queue.offerAll(messages).as()
+
+              override def sendAndConsume(messages: TestMessage[K, V]*): ZIO[Clock with Blocking, Throwable, Unit] = {
+                for {
+                  fiber <- consume(messages.size)
+                  _     <- send(messages: _*)
+                  _     <- fiber.join
+                } yield ()
+              }
+
+              def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]] =
+                messageStream.take(number).runDrain.fork
+
+            }
+            Has.allOf[MessageConsumer[K, V], TestKafkaMessageConsumer[K, V]](messageConsumer, messageConsumer)
           }
-
-          override def subscribe(fn: (K, V) => Task[Unit]): ZIO[Clock with Blocking with Console, Throwable, SubscriptionKillSwitch] = {
-            val shutdown = Task.unit
-            messageStream(fn).interruptWhen(shutdown).runDrain.as(SubscriptionKillSwitch(shutdown))
-          }
-
-          override def send(message: TestMessage[K, V]): Task[Unit] = queue.offer(message).as()
         }
-        Has.allOf[MessageConsumer[K, V], StubKafkaPusher[K, V]](messageConsumer, messageConsumer)
-      }
       effect.toLayerMany
     }
 

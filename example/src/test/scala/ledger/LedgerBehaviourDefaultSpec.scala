@@ -74,10 +74,9 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           (for {
             (_, probe)   <- ledgerStemtityAndProbe
             kafka        <- kafkaClient
-            _            <- kafka.send(TestMessage(LedgerId("kafkaKey"), Authorization(accountId, BigDecimal(10), "idempotency1")))
-            _            <- TestClock.adjust(1.millis) // we need the tick to trigger the kafka processing (double check why)
+            _            <- kafka.sendAndConsume(TestMessage(LedgerId("kafkaKey"), Authorization(accountId, BigDecimal(10), "idempotency1")))
             stateInitial <- probe(accountId).state
-            _            <- TestClock.adjust(200.millis)
+            _            <- TestClock.adjust(200.millis) // no subscribe in environment but subscribe inline with take after adjusting time
             console      <- TestConsole.output
           } yield {
             assert(stateInitial)(equalTo(1)) &&
@@ -91,19 +90,13 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
   // helper method to retrieve stemtity, probe and grpc
   private val ledgerStemtityAndProbe = ZIO.services[String => LedgerCommandHandler, StemtityProbe.Service[String, Int, LedgerEvent]]
   private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
-  //both for pushing and reading
-  private val kafkaClient = ZIO.service[TestMessageConsumer[LedgerId, LedgerInstructionsMessage]]
-
-  private def testComponentsLayer = stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
-    LedgerEntity.tagging,
-    EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler),
-    snapshotInterval = 2
-  )
-
-  private val kafkaPusherLayer = StubKafkaPusher.memory[LedgerId, LedgerInstructionsMessage]
+  private val kafkaClient = ZIO.service[TestKafka[LedgerId, LedgerInstructionsMessage]]
 
   private def env = {
-    val testCompLayer = testComponentsLayer ++ kafkaPusherLayer
-    testCompLayer >+> (LedgerGrpcService.live ++ LedgerReadSideProcessor.live ++ InboundMessageHandling.live)
+    stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
+      LedgerEntity.tagging,
+      EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler),
+      snapshotInterval = 2
+    ) >+> (LedgerGrpcService.live ++ LedgerReadSideProcessor.live ++ InboundMessageHandling.test)
   }
 }
