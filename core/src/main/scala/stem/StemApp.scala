@@ -84,7 +84,7 @@ object StemApp {
 
   }
 
-  def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
+  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
     sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
   ) = {
     for {
