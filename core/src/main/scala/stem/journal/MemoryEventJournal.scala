@@ -7,7 +7,6 @@ import zio.clock.Clock
 import zio.duration.Duration
 import zio.stream.ZStream
 
-//TODO improve performance since they are not great
 class MemoryEventJournal[Key, Event](
   pollingInterval: Duration,
   internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],

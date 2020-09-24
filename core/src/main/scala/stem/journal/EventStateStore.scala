@@ -3,7 +3,6 @@ package stem.journal
 import zio.Task
 import zio.stream.Stream
 
-// we need to store offset and snapshot
 trait EventStateStore[Key, Event, State] {
   type Offset = Long
 

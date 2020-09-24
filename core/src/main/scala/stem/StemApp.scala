@@ -110,6 +110,10 @@ object StemApp {
     committableJournalQueryStore ++ eventJournalStore ++ memoryEventJournalStore
   }
 
+  def liveRuntime[Key: Tag, Event: Tag](actorSystemName: String) = {
+    (ZEnv.live ++ stemStores[Key, Event]() ++ StemApp.actorSettings(actorSystemName)) >+> ReadSideProcessing.live
+  }
+
   object Ops {
 
     implicit class StubbableSio[-R, State: Tag, Event: Tag, Reject: Tag, Result](

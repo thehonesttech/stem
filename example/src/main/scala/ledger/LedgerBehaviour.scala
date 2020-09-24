@@ -38,23 +38,22 @@ object LedgerServer extends ServerMain {
 
   type LedgerCombinator = AlgebraCombinators[Int, LedgerEvent, String]
   val readSidePollingInterval: Duration = 100.millis
-  private val kafkaConfiguration: ULayer[Has[ConsumerConfiguration]] =
-    ZLayer.succeed(
-      KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
-        "testtopic",
-        ConsumerSettings(List("0.0.0.0"))
-      )
-    )
-  private val stemRuntimeLayer = (StemApp.stemStores[String, LedgerEvent]() ++ StemApp.actorSettings("System")) >+> ReadSideProcessing.live
-  private val ledgerEntity = stemRuntimeLayer to LedgerEntity.live
-  private val kafkaConsumer = (ledgerEntity ++ kafkaConfiguration) >+>
-    LedgerInboundMessageHandling.messageHandling.flatMap { logic =>
-      ZIO
-        .access[Has[ConsumerConfiguration]](layer => KafkaMessageConsumer(layer.get, logic): MessageConsumer[LedgerId, LedgerInstructionsMessage])
-    }.toLayer
 
-  private val kafkaMessageHandling = ZEnv.live and kafkaConsumer to LedgerInboundMessageHandling.live
-  private val readSideProcessor = (ZEnv.live and stemRuntimeLayer) to LedgerReadSideProcessor.live
+  private val kafkaConfiguration = KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
+    "testtopic",
+    ConsumerSettings(List("0.0.0.0"))
+  )
+  private val stemRuntimeLayer = StemApp.liveRuntime[String, LedgerEvent]("System")
+  private val ledgerEntity = stemRuntimeLayer to LedgerEntity.live
+  private val readSideProcessor = stemRuntimeLayer to LedgerReadSideProcessor.live
+
+  private val kafkaMessageConsumer = ledgerEntity to
+    LedgerInboundMessageHandling.messageHandling
+      .map(logic => KafkaMessageConsumer(kafkaConfiguration, logic): MessageConsumer[LedgerId, LedgerInstructionsMessage])
+      .toLayer
+
+  private val kafkaMessageHandling = ZEnv.live and kafkaMessageConsumer to LedgerInboundMessageHandling.live
+
   private val ledgerService = ledgerEntity to LedgerGrpcService.live
 
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
