@@ -3,22 +3,17 @@ package stem
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
 import stem.data.AlgebraCombinators.Combinators
-import stem.data.{AlgebraCombinators, Committable, ConsumerId, StemProtocol, Tagging}
+import stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
 import stem.journal.{EventJournal, JournalEntry}
-import stem.readside.{ReadSideProcessing, ReadSideSettings}
 import stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
-import stem.runtime.akka.{EventSourcedBehaviour, RuntimeSettings}
+import stem.readside.{ReadSideProcessing, ReadSideSettings}
+import stem.runtime.akka.RuntimeSettings
 import stem.runtime.readside.CommittableJournalQuery
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer}
-import stem.test.StemtityProbe
-import stem.test.TestStemRuntime.stemtity
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
-import zio.test.environment.{TestClock, TestConsole}
 import zio.{duration, Has, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
-
-// idempotency, traceId, deterministic tests, schemas in git, restart if unhandled error
 
 object StemApp {
 
@@ -40,49 +35,46 @@ object StemApp {
       Managed.make(Task(ActorSystem(name, ConfigFactory.load(confFileName))))(sys => Task.fromFuture(_ => sys.terminate()).either)
     )
 
-  def readSide[Id: Tag, Event: Tag, Offset: Tag](
-    name: String,
-    consumerId: ConsumerId,
-    tagging: Tagging[Id],
-    parallelism: Int = 30,
-    logic: (Id, Event) => Task[Unit]
-  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  def readSideStream[Id: Tag, Event: Tag, Offset: Tag](readSideParams: ReadSideParams[Id, Event])(
+    implicit runtime: Runtime[ZEnv]
+  ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
     // simplify and then improve it
-    ZIO.accessM { layers =>
+    ZStream.accessStream { layers =>
       val readSideProcessing = layers.get[ReadSideProcessing]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
-      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = tagging.tags.map { tag =>
-        journal.eventsByTag(tag, consumerId)
+      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
+        journal.eventsByTag(tag, readSideParams.consumerId)
       }
       // convert into process
-      buildStreamAndProcesses(sources).flatMap {
+      ZStream.fromEffect(buildStreamAndProcesses(sources)).flatMap {
         case (streams, processes) =>
-          readSideProcessing.start(name, processes.toList).flatMap { ks =>
+          ZStream.fromEffect(readSideProcessing.start(readSideParams.name, processes.toList)).flatMap { ks =>
             // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
-            streams.take(processes.size).runCollect.flatMap { elements =>
-              val listOfStreams = elements.toList
-              val processingStreams = listOfStreams.map { stream =>
-                ZStream.fromEffect(
-                  stream
-                    .mapMPar(parallelism) { element =>
-                      val journalEntry = element.value
-                      val commit = element.commit
-                      val key = journalEntry.event.entityKey
-                      val event = journalEntry.event.payload
-                      logic(key, event) <* commit
-                    }
-                    .runDrain
-                    .retry(Schedule.fixed(1.second))
-                )
+            streams
+              .map { stream =>
+                // ZStream.fromEffect(
+                stream
+                  .mapMPar(readSideParams.parallelism) { element =>
+                    val journalEntry = element.value
+                    val commit = element.commit
+                    val key = journalEntry.event.entityKey
+                    val event = journalEntry.event.payload
+                    readSideParams.logic(key, event).retry(Schedule.fixed(1.second)) <* commit
+                  }
               }
-              ZStream.mergeAll(sources.size)(processingStreams: _*).runDrain.fork.as(ks)
-            }
+              .flattenPar(sources.size)
+              .as(ks)
           }
       }
-
     }
-
   }
+
+  def readSideSubscription[Id: Tag, Event: Tag, Offset: Tag](
+    readsideParams: ReadSideParams[Id, Event]
+  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] =
+    readSideStream[Id, Event, Offset](readsideParams).runLast.map(_.getOrElse(KillSwitch(Task.unit)))
+
+  case class ReadSideParams[Id, Event](name: String, consumerId: ConsumerId, tagging: Tagging[Id], parallelism: Int = 30, logic: (Id, Event) => Task[Unit])
 
   private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
     sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]

@@ -8,5 +8,4 @@ The framework uses **ZIO** library for both streams and effects management.
 This makes possible deterministic and quick tests.
  
 This project is heavily inspired by **Lagom** and **Aecor**.
-It must considered as an experiment.
-Do not use in production yet.
+It has WIP quality, do not use in production yet.

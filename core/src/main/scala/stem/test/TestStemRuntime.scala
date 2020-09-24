@@ -2,18 +2,21 @@ package stem.test
 
 import scodec.bits.BitVector
 import stem.StemApp
+import stem.StemApp.ReadSideParams
 import stem.communication.kafka.MessageConsumer
 import stem.data.AlgebraCombinators.Combinators
 import stem.data._
 import stem.journal.MemoryEventJournal
-import stem.readside.ReadSideProcessing
+import stem.readside.{ReadSideProcessing, ReadSideProcessor}
+import stem.readside.ReadSideProcessing.{KillSwitch, Process}
 import stem.runtime.akka.{CommandResult, EventSourcedBehaviour, KeyAlgebraSender}
+import stem.runtime.readside.CommittableJournalQuery
 import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memoryJournalStoreLayer, snapshotStoreLayer}
 import stem.runtime.{AlgebraCombinatorConfig, Fold, KeyValueStore, KeyedAlgebraCombinators}
 import stem.snapshot.Snapshotting
 import zio.blocking.Blocking
 import zio.clock.Clock
-import zio.duration.durationInt
+import zio.duration.{durationInt, Duration}
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
 import zio.{duration, Chunk, Fiber, Has, Queue, RIO, Runtime, Tag, Task, UIO, URIO, ZEnv, ZIO, ZLayer}
@@ -26,11 +29,58 @@ object TestStemRuntime {
     def sendAndConsume(message: TestMessage[K, V]*): ZIO[Clock with Blocking, Throwable, Unit]
 
     def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]]
+
+    def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Throwable, Boolean]
+
   }
 
   type TestKafka[K, V] = TestKafkaMessageConsumer[K, V]
 
   case class TestMessage[K, V](key: K, value: V)
+
+  object TestReadSideProcessor {
+    trait TestReadSideProcessor {
+      def triggerReadSideProcessing: URIO[TestClock, Unit]
+
+      def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Throwable, Unit]
+
+    }
+
+    def memory[Id: Tag, Event: Tag, Offset: Tag]
+      : ZLayer[Has[ReadSideParams[Id, Event]] with Has[CommittableJournalQuery[Offset, Id, Event]], Nothing, Has[ReadSideProcessor] with Has[
+        TestReadSideProcessor
+      ]] = {
+      ZIO
+        .access[Has[ReadSideParams[Id, Event]] with Has[CommittableJournalQuery[Offset, Id, Event]]] { layer =>
+          val readSideParams = layer.get[ReadSideParams[Id, Event]]
+          val committableJournalQuery = layer.get[CommittableJournalQuery[Offset, Id, Event]]
+          val readSideProcessing = ReadSideProcessing.memory
+          implicit val runtime = Runtime.default
+          val stream: ZStream[Clock, Throwable, KillSwitch] =
+            StemApp
+              .readSideStream[Id, Event, Offset](readSideParams)
+              .provideSomeLayer[Clock](readSideProcessing ++ ZLayer.succeed(committableJournalQuery))
+          val el = new ReadSideProcessor with TestReadSideProcessor {
+            override val readSideStream: ZStream[Clock, Throwable, KillSwitch] = stream
+
+            override def triggerReadSideProcessing: URIO[TestClock, Unit] = TestClock.adjust(100.millis)
+
+            def consume(n: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]] =
+              stream.take(n).runDrain.fork
+
+            override def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Throwable, Unit] =
+              for {
+                fiber <- consume(n)
+                _     <- triggerReadSideProcessing
+                _     <- fiber.join
+              } yield ()
+          }
+          Has.allOf[ReadSideProcessor, TestReadSideProcessor](el, el)
+        }
+        .toLayerMany
+    }
+
+  }
 
   object TestKafkaMessageConsumer {
 
@@ -57,6 +107,23 @@ object TestStemRuntime {
 
               def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]] =
                 messageStream.take(number).runDrain.fork
+
+              def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Throwable, Boolean] =
+                for {
+                  fiber <- messageStream
+                    .take(1)
+                    .runCollect
+                    .timeout(duration)
+                    .map {
+                      case Some(_) =>
+                        true
+                      case None =>
+                        false
+                    }
+                    .fork
+                  _      <- TestClock.adjust(duration)
+                  result <- fiber.join
+                } yield result
 
             }
             Has.allOf[MessageConsumer[K, V], TestKafkaMessageConsumer[K, V]](messageConsumer, messageConsumer)
@@ -198,11 +265,6 @@ object StemtityProbe {
       }
 
   }
-
-}
-
-trait StemOps {
-  implicit val runtime: zio.Runtime[ZEnv] = zio.Runtime.default
 
 }
 

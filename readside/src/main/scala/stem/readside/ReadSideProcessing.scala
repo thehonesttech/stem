@@ -5,17 +5,23 @@ import java.nio.charset.StandardCharsets
 
 import akka.actor.ActorSystem
 import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
-import akka.pattern.{BackoffOpts, BackoffSupervisor, ask}
+import akka.pattern.{ask, BackoffOpts, BackoffSupervisor}
 import akka.util.Timeout
 import stem.readside.ReadSideProcessing.{KillSwitch, _}
 import stem.readside.ReadSideWorkerActor.KeepRunning
-import zio.{Runtime, Task, ZEnv, ZIO, ZLayer}
+import zio.clock.Clock
+import zio.stream.ZStream
+import zio.{Has, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration.{FiniteDuration, _}
 
 trait ReadSideProcessing {
 
   def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch]
+}
+
+trait ReadSideProcessor {
+  def readSideStream: ZStream[Clock, Throwable, KillSwitch]
 }
 
 final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing {
@@ -80,7 +86,7 @@ object ReadSideProcessing {
     ActorReadSideProcessing(actorSystem, readSideSettings)
   }
 
-  val memory = ZLayer.succeed {
+  val memory: ULayer[Has[ReadSideProcessing]] = ZLayer.succeed {
     new ReadSideProcessing {
       def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch] = {
         for {

@@ -2,19 +2,23 @@ package ledger
 
 import ledger.Converters.toLedgerBigDecimal
 import ledger.LedgerEntity.LedgerCommandHandler
+import ledger.LedgerGrpcService.Ledgers
+import ledger.LedgerInboundMessageHandling.messageHandling
+import ledger.LedgerTest._
 import ledger.communication.grpc.service.{LockReply, LockRequest, ZioService}
 import ledger.eventsourcing.events.events.{AmountLocked, LedgerEvent}
 import ledger.messages.messages.{Authorization, LedgerId, LedgerInstructionsMessage}
+import stem.communication.kafka.MessageConsumer
 import stem.data.Versioned
 import stem.runtime.akka.EventSourcedBehaviour
-import stem.test.StemtityProbe
 import stem.test.TestStemRuntime._
+import stem.test.{StemtityProbe, TestStemRuntime}
 import zio.duration.durationInt
 import zio.test.Assertion.{equalTo, hasSameElements, isNone, isSome}
 import zio.test.Eql._
 import zio.test._
-import zio.test.environment.{TestClock, TestConsole}
-import zio.{ZEnv, ZIO}
+import zio.test.environment.TestConsole
+import zio.{Has, ZEnv, ZIO, ZLayer}
 
 object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
@@ -33,7 +37,6 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           events2                     <- probe(key).events
           updatedState                <- probe(key).state
           stateAfter2Events           <- probe(key).stateFromSnapshot
-          _                           <- TestClock.adjust(200.millis)
           _                           <- ledgers(keyOther).lock(BigDecimal(5), "test4")
           initialStateForSecondEntity <- probe(keyOther).state
         } yield {
@@ -59,7 +62,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             service      <- ledgerGrpcService
             lockReply    <- service.lock(LockRequest(key, "accountId1", BigDecimal(10), "idempotency1"))
             stateInitial <- probe(key).state
-            _            <- TestClock.adjust(200.millis) // read side is executing code (100 millis is the polling interval)
+            readSide     <- readSideClient
+            _            <- readSide.triggerReadSideAndWaitFor(1)
             console      <- TestConsole.output
           } yield {
             assert(lockReply)(equalTo(LockReply("Allowed"))) &&
@@ -72,13 +76,16 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           //call grpc service, check events and state, advance time, read side view, send with kafka
           val accountId = "accountId1"
           (for {
-            (_, probe)   <- ledgerStemtityAndProbe
-            kafka        <- kafkaClient
-            _            <- kafka.sendAndConsume(TestMessage(LedgerId("kafkaKey"), Authorization(accountId, BigDecimal(10), "idempotency1")))
-            stateInitial <- probe(accountId).state
-            _            <- TestClock.adjust(200.millis) // no subscribe in environment but subscribe inline with take after adjusting time
-            console      <- TestConsole.output
+            (_, probe)     <- ledgerStemtityAndProbe
+            kafka          <- kafkaClient
+            _              <- kafka.sendAndConsume(TestMessage(LedgerId("kafkaKey"), Authorization(accountId, BigDecimal(10), "idempotency1")))
+            messageArrived <- kafka.hasMessagesArrivedInTimeWindow(1.millis)
+            stateInitial   <- probe(accountId).state
+            readSide       <- readSideClient
+            _              <- readSide.triggerReadSideAndWaitFor(1)
+            console        <- TestConsole.output
           } yield {
+            assert(messageArrived)(equalTo(false)) &&
             assert(stateInitial)(equalTo(1)) &&
             assert(console)(equalTo(Vector("Arrived accountId1\n")))
           }).provideLayer(env)
@@ -88,15 +95,25 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   // real from stubbed are these modules: readSideProcessing, memoryStores and testStem/stem
   // helper method to retrieve stemtity, probe and grpc
-  private val ledgerStemtityAndProbe = ZIO.services[String => LedgerCommandHandler, StemtityProbe.Service[String, Int, LedgerEvent]]
-  private val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
-  private val kafkaClient = ZIO.service[TestKafka[LedgerId, LedgerInstructionsMessage]]
+
+  private val testMessageConsumer: ZLayer[Has[Ledgers], Throwable, Has[MessageConsumer[LedgerId, LedgerInstructionsMessage]] with Has[
+    TestStemRuntime.TestKafka[LedgerId, LedgerInstructionsMessage]
+  ]] = messageHandling.toLayer >>> TestKafkaMessageConsumer
+      .memory[LedgerId, LedgerInstructionsMessage]
 
   private def env = {
-    stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
+    (stemtityAndReadSideLayer[String, LedgerCommandHandler, Int, LedgerEvent, String](
       LedgerEntity.tagging,
       EventSourcedBehaviour(new LedgerCommandHandler(), LedgerEntity.eventHandlerLogic, LedgerEntity.errorHandler),
       snapshotInterval = 2
-    ) >+> (LedgerGrpcService.live ++ LedgerReadSideProcessor.live ++ InboundMessageHandling.test)
+    ) >+> LedgerReadSideProcessor.readSideParams.toLayer) >+> (LedgerGrpcService.live ++ TestReadSideProcessor
+      .memory[String, LedgerEvent, Long] ++ testMessageConsumer)
   }
+}
+
+object LedgerTest {
+  val ledgerStemtityAndProbe = ZIO.services[String => LedgerCommandHandler, StemtityProbe.Service[String, Int, LedgerEvent]]
+  val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
+  val kafkaClient = ZIO.service[TestKafka[LedgerId, LedgerInstructionsMessage]]
+  val readSideClient = ZIO.service[TestReadSideProcessor.TestReadSideProcessor]
 }
