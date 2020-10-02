@@ -30,13 +30,9 @@ lazy val `readside` =
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
 lazy val `example` = stemModule("example", "Ledger example")
   .dependsOn(`core`, `macros`, `readside`)
-  .settings(libraryDependencies ++= testDeps)
+  .settings(libraryDependencies ++= testDeps ++ exampleDeps)
   .settings(zioTest)
   .settings(commonProtobufSettings)
-lazy val benchmarks = stemModule("benchmarks", "Stem Benchmarks")
-  .dependsOn(core, example)
-  .settings(libraryDependencies ++= allDeps)
-  .enablePlugins(JmhPlugin)
 
 
 lazy val root = (project in file("."))
@@ -51,6 +47,10 @@ lazy val root = (project in file("."))
     name := "Stem",
     commonSettings
   )
+
+val exampleDeps = Seq(
+  "com.vladkopanev" %% "zio-saga-core" % "0.4.0"
+)
 
 val testDeps = Seq(
   "org.scalatest" %% "scalatest" % "3.1.1" % Test,
@@ -78,6 +78,6 @@ val allDeps = Seq(
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps
 
-aggregateProjects(`core`, `example`, `data`, `readside`, `macros`, `benchmarks`)
+aggregateProjects(`core`, `example`, `data`, `readside`, `macros`)
 
 val zioTest = testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")

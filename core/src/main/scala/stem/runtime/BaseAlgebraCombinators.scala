@@ -1,6 +1,7 @@
 package stem.runtime
 
 import izumi.reflect.Tag
+import stem.data.AlgebraCombinators.ImpossibleTransitionException
 import stem.data.{AlgebraCombinators, Tagging, Versioned}
 import stem.journal.{EventJournal, MemoryEventJournal}
 import stem.runtime.readside.JournalQuery
@@ -104,9 +105,14 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
               case ((state, _), entityEvent) =>
                 foldBehaviour
                   .reduce(state, entityEvent.payload)
-                  .map { processedState =>
-                    processedState -> entityEvent.sequenceNr
-                  }
+                  .bimap(
+                    {
+                      case Fold.ImpossibleException => ImpossibleTransitionException(state, entityEvent)
+                      case other                    => other
+                    }, { processedState =>
+                      processedState -> entityEvent.sequenceNr
+                    }
+                  )
             }
             .map(_._1)
 
@@ -145,7 +151,7 @@ object KeyValueStore {
   }
 }
 
-// TODO: can the output be a Task or must it be a State?
+// TODO: can the output be a IO instead?
 final case class Fold[State, Event](initial: State, reduce: (State, Event) => Task[State]) {
   def init(a: State): Fold[State, Event] = copy(initial = a)
 
@@ -162,7 +168,8 @@ final case class Fold[State, Event](initial: State, reduce: (State, Event) => Ta
 }
 
 object Fold {
-
+  object ImpossibleException extends RuntimeException
+  val impossible = Task.fail(ImpossibleException)
   def count[A]: Fold[Long, A] =
     Fold(0L, (c, _) => Task.succeed(c + 1L))
 }

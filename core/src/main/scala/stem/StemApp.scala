@@ -13,7 +13,7 @@ import stem.runtime.readside.JournalStores.{memoryCommittableJournalStore, memor
 import zio.clock.Clock
 import zio.duration.durationInt
 import zio.stream.ZStream
-import zio.{duration, Has, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{duration, Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULayer, ZEnv, ZIO, ZLayer}
 
 object StemApp {
 
@@ -24,10 +24,10 @@ object StemApp {
 
     override def append(es: Any, other: Any*): Task[Unit] = throw new RuntimeException("This is a stub")
 
-    override def reject[A](r: Reject): REJIO[A] = throw new RuntimeException("This is a stub")
+    override def reject[A](r: Reject): IO[Reject, A] = throw new RuntimeException("This is a stub")
   }
 
-  def stubCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
+  def clientEmptyCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
     ZLayer.succeed(liveAlgebra[Reject])
 
   def actorSystemLayer(name: String, confFileName: String = "stem.conf") =
@@ -52,7 +52,6 @@ object StemApp {
             // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
             streams
               .map { stream =>
-                // ZStream.fromEffect(
                 stream
                   .mapMPar(readSideParams.parallelism) { element =>
                     val journalEntry = element.value
@@ -109,10 +108,13 @@ object StemApp {
     }
     committableJournalQueryStore ++ eventJournalStore ++ memoryEventJournalStore
   }
-
-  def liveRuntime[Key: Tag, Event: Tag](actorSystemName: String) = {
-    (ZEnv.live ++ stemStores[Key, Event]() ++ StemApp.actorSettings(actorSystemName)) >+> ReadSideProcessing.live
+  def liveRuntime[Key: Tag, Event: Tag] = {
+    (ZEnv.live ++ stemStores[Key, Event]()) ++ ReadSideProcessing.live
   }
+
+  /*def liveRuntime[Key: Tag, Event: Tag](actorSystemName: String) = {
+    (ZEnv.live ++ stemStores[Key, Event]() ++ StemApp.actorSettings(actorSystemName)) >+> ReadSideProcessing.live
+  } */
 
   object Ops {
 
@@ -120,11 +122,11 @@ object StemApp {
       returnType: ZIO[Combinators[State, Event, Reject], Reject, Result]
     ) {
       def provideCombinator: ZIO[Any, Reject, Result] = {
-        returnType.provideLayer(stubCombinator[State, Event, Reject])
+        returnType.provideLayer(clientEmptyCombinator[State, Event, Reject])
       }
 
       def provideSomeCombinator[R0 <: Has[_]](implicit ev: R0 with Combinators[State, Event, Reject] <:< R) =
-        returnType.provideSomeLayer[R0](stubCombinator[State, Event, Reject])
+        returnType.provideSomeLayer[R0](clientEmptyCombinator[State, Event, Reject])
     }
 
   }

@@ -14,10 +14,11 @@ import zio.kafka.producer.{Producer, ProducerSettings}
 import zio.kafka.serde._
 import zio.stream.ZStream
 
-class KafkaMessageConsumer[K: Tag, V: Tag](
+class KafkaMessageConsumer[K: Tag, V: Tag, Reject: Tag](
   consumerConfiguration: KafkaConsumerConfig[K, V],
-  logic: (K, V) => Task[Unit]
-) extends MessageConsumer[K, V] {
+  errorHandler: Throwable => Reject,
+  logic: (K, V) => IO[Reject, Unit]
+) extends MessageConsumer[K, V, Reject] {
   type RecordProducer = Producer[Any, K, V]
   val consumerManaged: ZManaged[Clock with Blocking, Throwable, Consumer.Service] =
     Consumer.make(consumerConfiguration.consumerSettings)
@@ -25,11 +26,12 @@ class KafkaMessageConsumer[K: Tag, V: Tag](
   val consumer: ZLayer[Clock with Blocking, Throwable, Consumer] =
     ZLayer.fromManaged(consumerManaged)
 
-  val messageStream: ZStream[Clock with Blocking, Throwable, Unit] = {
+  val messageStream: ZStream[Clock with Blocking, Reject, Unit] = {
     Consumer
       .subscribeAnd(Subscription.topics(consumerConfiguration.topic))
       .plainStream(consumerConfiguration.keySerde, consumerConfiguration.valueSerde)
       .provideSomeLayer(consumer)
+      .mapError(errorHandler)
       .mapM { record =>
         val key = record.key
         val value = record.value
@@ -46,7 +48,7 @@ object MessageConsumerSubscriber {
     def consumeForever: ZIO[Console with Clock with Blocking, Nothing, SubscriptionKillSwitch]
   }
 
-  val live = ZIO.access[ZStream[Clock with Blocking, Throwable, Unit]] { messageStream =>
+  val live = ZIO.access[ZStream[Clock with Blocking, String, Unit]] { messageStream =>
     new Service {
       private val scheduleEvery5Seconds = Schedule
         .spaced(5.seconds)
@@ -65,9 +67,9 @@ object MessageConsumerSubscriber {
 
 case class SubscriptionKillSwitch(shutdown: Task[Unit])
 
-trait MessageConsumer[K, V] {
+trait MessageConsumer[K, V, Reject] {
 
-  def messageStream: ZStream[Clock with Blocking, Throwable, Unit]
+  def messageStream: ZStream[Clock with Blocking, Reject, Unit]
 
 }
 
@@ -122,8 +124,12 @@ class GrpcSerde[T <: GeneratedMessage: GeneratedMessageCompanion] extends Serde[
 }
 
 object KafkaMessageConsumer {
-  def apply[K: Tag, V: Tag](consumerConfiguration: KafkaConsumerConfig[K, V], logic: (K, V) => Task[Unit]): KafkaMessageConsumer[K, V] =
-    new KafkaMessageConsumer(consumerConfiguration, logic)
+  def apply[K: Tag, V: Tag, Reject: Tag](
+    consumerConfiguration: KafkaConsumerConfig[K, V],
+    errorHandler: Throwable => Reject,
+    logic: (K, V) => IO[Reject, Unit]
+  ): KafkaMessageConsumer[K, V, Reject] =
+    new KafkaMessageConsumer(consumerConfiguration, errorHandler, logic)
 }
 
 class KafkaProducer[K: Tag, V: Tag](

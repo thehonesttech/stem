@@ -1,6 +1,6 @@
 package stem.journal
 
-import stem.data.EventTag
+import stem.data.{EntityEvent, EventTag}
 import stem.runtime.readside.JournalQuery
 import zio._
 import zio.clock.Clock

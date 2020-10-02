@@ -9,3 +9,6 @@ This makes possible deterministic and quick tests.
  
 This project is heavily inspired by **Lagom** and **Aecor**.
 It has WIP quality, do not use in production yet.
+
+- schema first
+- avoid boilerplate

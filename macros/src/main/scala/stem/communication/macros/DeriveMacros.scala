@@ -1,5 +1,7 @@
 package stem.communication.macros
 
+import scodec.bits.BitVector
+
 import scala.reflect.macros.blackbox
 import stem.communication.macros.annotations.MethodId
 
@@ -39,7 +41,7 @@ class DeriveMacros(val c: blackbox.Context) {
       m =>
         m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
           m.owner
-      )
+        )
     )
   }
 
@@ -54,9 +56,9 @@ class DeriveMacros(val c: blackbox.Context) {
         }
         val signature = method.typeSignatureIn(algebra)
         val typeParams = for (tp <- signature.typeParams) yield typeDef(tp)
-        val paramLists = for (ps <- signature.paramLists)
-          yield
-            for (p <- ps) yield {
+        val paramLists =
+          for (ps <- signature.paramLists)
+            yield for (p <- ps) yield {
               // Only preserve the implicit modifier (e.g. drop the default parameter flag).
               val modifiers = if (p.isImplicit) Modifiers(Flag.IMPLICIT) else Modifiers()
               ValDef(modifiers, p.name.toTermName, TypeTree(p.typeSignatureIn(algebra)), EmptyTree)
@@ -81,34 +83,50 @@ class DeriveMacros(val c: blackbox.Context) {
     methods.zipWithIndex.map {
       case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
 //        println(s"OutParams $outParams on method $method")
+
         val out = outParams.last
         val paramTypes = paramList.flatten.map(_.tpt)
-        val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
-        val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
         val args = method.argLists((pn, _) => Ident(pn)).flatten
-
         val hintToUse: String = hint.getOrElse(index).toString
 
-        // TODO: missing empty args
+        val code = if (args.isEmpty) {
+          q"""
+             (for {
+                    // start common code
+                    arguments <- Task.fromTry(mainCodec.encode(hint -> BitVector.empty).toTry).mapError(errorHandler)
+                    vector    <- commFn(arguments).mapError(errorHandler)
+                    // end of common code
+                    decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
+                    result <- ZIO.fromEither(decoded)
+               } yield result) 
+          """
+        } else {
+          val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+          val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
+          q"""val codecInput = codec[$TupleNCons[..$paramTypes]]
+              val tuple: $TupleNCons[..$paramTypes] = $TupleNConsTerm(..$args)
+             
+              // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
+              (for {
+                    tupleEncoded <- IO.fromTry(codecInput.encode(tuple).toTry).mapError(errorHandler)
+             
+                    // start common code
+                    arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
+                    vector    <- commFn(arguments).mapError(errorHandler)
+                    // end of common code
+                    decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
+                    result <- ZIO.fromEither(decoded)
+               } yield result)"""
+
+        }
+
         val newBody =
           q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
                        val hint = $hintToUse
-
-                       val codecInput = codec[$TupleNCons[..$paramTypes]]
+                       
                        val codecResult = codec[Either[$reject, $out]]
-                       val tuple: $TupleNCons[..$paramTypes] = $TupleNConsTerm(..$args)
-
-                       // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
-                       (for {
-                         tupleEncoded <- IO.fromTry(codecInput.encode(tuple).toTry).mapError(errorHandler)
-
-                         // start common code
-                         arguments <- Task.fromTry(mainCodec.encode(hint -> tupleEncoded).toTry).mapError(errorHandler)
-                         vector    <- commFn(arguments).mapError(errorHandler)
-                         // end of common code
-                         decoded <- IO.fromTry(codecResult.decodeValue(vector).toTry).mapError(errorHandler)
-                         result <- ZIO.fromEither(decoded)
-                       } yield result)
+                       
+                       ..$code
                      }"""
         method.copy(body = newBody).definition
     }
@@ -148,7 +166,6 @@ class DeriveMacros(val c: blackbox.Context) {
 
               q"""
                val codecInput = codec[$TupleNCons[..$paramTypes]]
-               val codecResult = codec[Either[$reject, $out]]
                """
             }
 
@@ -158,11 +175,16 @@ class DeriveMacros(val c: blackbox.Context) {
             else
               q"algebra.$name(...$argList).either"
 
+          val codecInputCode =
+            if (argList.isEmpty) q"Task.unit"
+            else
+              q"""Task.fromTry(codecInput.decodeValue(arguments).toTry)"""
           val invocation =
             q"""
+              val codecResult = codec[Either[$reject, $out]]
               ..$argsTerm
               for {
-                  args  <- Task.fromTry(codecInput.decodeValue(arguments).toTry)
+                  args <- $codecInputCode
                   result <- $runImplementation
                   vector <- Task.fromTry(codecResult.encode(result).toTry)
               } yield vector

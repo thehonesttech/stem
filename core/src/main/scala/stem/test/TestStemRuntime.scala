@@ -19,22 +19,22 @@ import zio.clock.Clock
 import zio.duration.{durationInt, Duration}
 import zio.stream.ZStream
 import zio.test.environment.{TestClock, TestConsole}
-import zio.{duration, Chunk, Fiber, Has, Queue, RIO, Runtime, Tag, Task, UIO, URIO, ZEnv, ZIO, ZLayer}
+import zio.{duration, Chunk, Fiber, Has, IO, Queue, RIO, Runtime, Tag, Task, UIO, URIO, ZEnv, ZIO, ZLayer}
 
 object TestStemRuntime {
 
-  trait TestKafkaMessageConsumer[K, V] {
-    def send(message: TestMessage[K, V]*): Task[Unit]
+  trait TestKafkaMessageConsumer[K, V, Reject] {
+    def send(message: TestMessage[K, V]*): UIO[Unit]
 
-    def sendAndConsume(message: TestMessage[K, V]*): ZIO[Clock with Blocking, Throwable, Unit]
+    def sendAndConsume(message: TestMessage[K, V]*): ZIO[Clock with Blocking, Reject, Unit]
 
-    def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]]
+    def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Reject, Unit]]
 
-    def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Throwable, Boolean]
+    def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Reject, Boolean]
 
   }
 
-  type TestKafka[K, V] = TestKafkaMessageConsumer[K, V]
+  type TestKafka[K, V, Reject] = TestKafkaMessageConsumer[K, V, Reject]
 
   case class TestMessage[K, V](key: K, value: V)
 
@@ -85,19 +85,20 @@ object TestStemRuntime {
   object TestKafkaMessageConsumer {
 
     // TODO apply the same strategy for stemtity probes
-    def memory[K: Tag, V: Tag]: ZLayer[Has[(K, V) => Task[Unit]], Nothing, Has[MessageConsumer[K, V]] with Has[TestKafkaMessageConsumer[K, V]]] = {
-      val effect: ZIO[Has[(K, V) => Task[Unit]], Nothing, Has[MessageConsumer[K, V]] with Has[TestKafkaMessageConsumer[K, V]]] =
-        ZIO.accessM[Has[(K, V) => Task[Unit]]] { layer =>
+    def memory[K: Tag, V: Tag, Reject: Tag]
+      : ZLayer[Has[(K, V) => IO[Reject, Unit]], Nothing, Has[MessageConsumer[K, V, Reject]] with Has[TestKafkaMessageConsumer[K, V, Reject]]] = {
+      val effect: ZIO[Has[(K, V) => IO[Reject, Unit]], Nothing, Has[MessageConsumer[K, V, Reject]] with Has[TestKafkaMessageConsumer[K, V, Reject]]] =
+        ZIO.accessM[Has[(K, V) => IO[Reject, Unit]]] { layer =>
           val logic = layer.get
           Queue.unbounded[TestMessage[K, V]].map { queue =>
-            val messageConsumer = new MessageConsumer[K, V] with TestKafkaMessageConsumer[K, V] {
-              val messageStream: ZStream[Clock with Blocking, Throwable, Unit] = ZStream.fromQueue(queue).mapM { message =>
+            val messageConsumer = new MessageConsumer[K, V, Reject] with TestKafkaMessageConsumer[K, V, Reject] {
+              val messageStream: ZStream[Clock with Blocking, Reject, Unit] = ZStream.fromQueue(queue).mapM { message =>
                 logic(message.key, message.value)
               }
 
-              override def send(messages: TestMessage[K, V]*): Task[Unit] = queue.offerAll(messages).as()
+              override def send(messages: TestMessage[K, V]*): UIO[Unit] = queue.offerAll(messages).as()
 
-              override def sendAndConsume(messages: TestMessage[K, V]*): ZIO[Clock with Blocking, Throwable, Unit] = {
+              override def sendAndConsume(messages: TestMessage[K, V]*): ZIO[Clock with Blocking, Reject, Unit] = {
                 for {
                   fiber <- consume(messages.size)
                   _     <- send(messages: _*)
@@ -105,10 +106,10 @@ object TestStemRuntime {
                 } yield ()
               }
 
-              def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]] =
+              def consume(number: Int): URIO[Clock with Blocking, Fiber.Runtime[Reject, Unit]] =
                 messageStream.take(number).runDrain.fork
 
-              def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Throwable, Boolean] =
+              def hasMessagesArrivedInTimeWindow(duration: Duration = 1.millis): ZIO[TestClock with Clock with Blocking, Reject, Boolean] =
                 for {
                   fiber <- messageStream
                     .take(1)
@@ -126,7 +127,7 @@ object TestStemRuntime {
                 } yield result
 
             }
-            Has.allOf[MessageConsumer[K, V], TestKafkaMessageConsumer[K, V]](messageConsumer, messageConsumer)
+            Has.allOf[MessageConsumer[K, V, Reject], TestKafkaMessageConsumer[K, V, Reject]](messageConsumer, messageConsumer)
           }
         }
       effect.toLayerMany
@@ -180,7 +181,7 @@ object TestStemRuntime {
       ])
 
     zio.test.environment.TestEnvironment.live ++ TestConsole.silent ++ TestClock.any ++ StemApp
-      .stubCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory
+      .clientEmptyCombinator[State, Event, Reject] ++ stemtityAndProbe ++ ReadSideProcessing.memory
   }
 
   def buildTestStemtity[Algebra, Key: Tag, Event: Tag, State: Tag, Reject: Tag](
@@ -288,7 +289,7 @@ object ZIOOps {
 
   def testLayer[State: Tag, Event: Tag, Reject: Tag]
     : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[AlgebraCombinators[State, Event, Reject]]] =
-    zio.test.environment.testEnvironment ++ StemApp.stubCombinator[State, Event, Reject]
+    zio.test.environment.testEnvironment ++ StemApp.clientEmptyCombinator[State, Event, Reject]
 
   implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
     def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {

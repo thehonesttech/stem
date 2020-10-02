@@ -2,46 +2,56 @@ syntax = "proto3";
 
 package ledger.communication.grpc;
 
-import "events.proto";
+import "commons.proto";
+import "scalapb/scalapb.proto";
+
+option (scalapb.options) = {
+    flat_package: true
+    lenses: true
+    retain_source_code_info: false
+    no_default_values_in_constructor: false
+    preserve_unknown_fields: false
+};
+
 
 // The ledger service definition.
 service Ledger {
-    rpc Lock (LockRequest) returns (LockReply) {}
-    rpc Release (ReleaseRequest) returns (ReleaseReply) {}
-    rpc Clear (ClearRequest) returns (ClearReply) {}
+    //rpc Lock (LockRequest) returns (LockReply) {}
+    rpc Create (CreateRequest) returns (CreateReply) {}
+    rpc Authorize (AuthorizeRequest) returns (AuthorizeReply) {}
 }
 
 // The request message containing the user's name.
-message LockRequest {
-    string id = 1;
-    string accountId = 2;
-    ledger.eventsourcing.events.BigDecimal amount = 3;
-    string idempotencyKey = 4;
+//message LockRequest {
+//    string id = 1;
+//    string accountId = 2;
+//    stem.commons.BigDecimal amount = 3;
+//    string idempotencyKey = 4;
+//}
+
+// The response message containing the greetings
+//message LockReply {
+//    string message = 1;
+//}
+
+// The request message containing the user's name.
+message CreateRequest {
+    string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
+    string accountId = 2 [(scalapb.field).type = "accounts.AccountId"];
+    stem.commons.BigDecimal amount = 3;
 }
 
 // The response message containing the greetings
-message LockReply {
+message CreateReply {
     string message = 1;
 }
 
 // The request message containing the user's name.
-message ReleaseRequest {
-    string id = 1;
-    string accountId = 2;
+message AuthorizeRequest {
+    string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
 }
 
 // The response message containing the greetings
-message ReleaseReply {
-    string message = 1;
-}
-
-// The request message containing the user's name.
-message ClearRequest {
-    string id = 1;
-    string accountId = 2;
-}
-
-// The response message containing the greetings
-message ClearReply {
+message AuthorizeReply {
     string message = 1;
 }

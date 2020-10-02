@@ -1,8 +1,8 @@
 package stem.journal
 
-import stem.data.Tagging
-import zio.{NonEmptyChunk, RIO, Task}
+import stem.data.{EntityEvent, Tagging}
 import zio.stream.Stream
+import zio.{NonEmptyChunk, RIO}
 
 /**
   * Describes abstract event journal.
@@ -16,8 +16,4 @@ trait EventJournal[K, E] {
   type HasTagging = Tagging[K]
   def append(key: K, offset: Long, events: NonEmptyChunk[E]): RIO[HasTagging, Unit]
   def read(key: K, offset: Long): Stream[Nothing, EntityEvent[K, E]]
-}
-
-final case class EntityEvent[K, A](entityKey: K, sequenceNr: Long, payload: A) {
-  def map[B](f: A => B): EntityEvent[K, B] = copy(payload = f(payload))
 }
