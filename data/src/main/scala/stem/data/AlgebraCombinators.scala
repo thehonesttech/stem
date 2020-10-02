@@ -3,8 +3,8 @@ package stem.data
 import zio._
 
 trait AlgebraCombinators[+State, -Event, Reject] {
-  def read: Task[State]
-  def append(es: Event, other: Event*): Task[Unit]
+  def read: IO[Reject, State]
+  def append(es: Event, other: Event*): IO[Reject, Unit]
   def ignore: UIO[Unit] = IO.unit
   def reject[A](r: Reject): IO[Reject, A]
 }
