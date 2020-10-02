@@ -2,7 +2,7 @@ package ledger
 
 import accounts.AccountEntity
 import accounts.AccountEntity.AccountCommandHandler
-import stem.Converters.toGrpcBigDecimal
+import .toGrpcBigDecimal
 import ledger.LedgerGrpcService.Accounts
 import ledger.LedgerInboundMessageHandling.messageHandling
 import ledger.LedgerTest._
@@ -55,7 +55,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
       }),
       suite("End to end test with memory implementations")(
         testM("End to end test using grpc service") {
-          import stem.Converters.Ops._
+          import .Ops._
           val key = "key4"
           //call grpc service, check events and state, advance time, read side view, send with kafka
           (for {
@@ -73,7 +73,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           }).provideLayer(env)
         },
         testM("End to end test using Kafka") {
-          import stem.Converters.Ops._
+          import .Ops._
           //call grpc service, check events and state, advance time, read side view, send with kafka
           val accountId = "accountId1"
           (for {

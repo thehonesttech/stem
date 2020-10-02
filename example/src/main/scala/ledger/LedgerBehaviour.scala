@@ -62,7 +62,9 @@ object LedgerServer extends ServerMain {
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
     (ledgerService and kafkaMessageHandling and readSideProcessor).mapError(_ => new RuntimeException("Bad layer"))
 
-  val emptyCombinators = clientEmptyCombinator[AccountState, AccountEvent, String] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
+  val emptyCombinators: ZLayer[Any, Nothing, Has[AlgebraCombinators[AccountState, AccountEvent, String]] with Has[
+    AlgebraCombinators[TransactionState, TransactionEvent, String]
+  ]] = clientEmptyCombinator[AccountState, AccountEvent, String] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
