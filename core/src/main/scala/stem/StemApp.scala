@@ -20,9 +20,9 @@ object StemApp {
   type SIO[State, Event, Reject, Result] = ZIO[Combinators[State, Event, Reject], Reject, Result]
 
   def liveAlgebra[Reject]: AlgebraCombinators[Nothing, Any, Reject] = new AlgebraCombinators[Nothing, Any, Reject] {
-    override def read: Task[Nothing] = throw new RuntimeException("This is a stub")
+    override def read: IO[Reject, Nothing] = throw new RuntimeException("This is a stub")
 
-    override def append(es: Any, other: Any*): Task[Unit] = throw new RuntimeException("This is a stub")
+    override def append(es: Any, other: Any*): IO[Reject, Unit] = throw new RuntimeException("This is a stub")
 
     override def reject[A](r: Reject): IO[Reject, A] = throw new RuntimeException("This is a stub")
   }

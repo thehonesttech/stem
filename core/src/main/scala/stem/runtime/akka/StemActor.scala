@@ -40,7 +40,9 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
     }
 
   private val algebraCombinatorsWithKeyResolved: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
-    KeyedAlgebraCombinators.fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig).toLayer
+    KeyedAlgebraCombinators
+      .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, eventSourcedBehaviour.errorHandler, algebraCombinatorConfig)
+      .toLayer
 
   override def receive: Receive = {
     case Start =>

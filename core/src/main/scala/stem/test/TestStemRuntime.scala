@@ -200,7 +200,7 @@ object TestStemRuntime {
               combinator
             case None =>
               KeyedAlgebraCombinators
-                .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, algebraCombinatorConfig)
+                .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, eventSourcedBehaviour.errorHandler, algebraCombinatorConfig)
                 .flatMap { combinator =>
                   val uioCombinator = UIO.succeed(combinator)
                   ZIO.effectTotal {

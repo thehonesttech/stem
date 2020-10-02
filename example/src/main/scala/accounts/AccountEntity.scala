@@ -1,8 +1,7 @@
 package accounts
 
-import stem.Converters._
+import ledger.LedgerServer
 import ledger.eventsourcing.events._
-import ledger.{Allowed, LedgerServer, LockResponse}
 import scalapb.TypeMapper
 import stem.StemApp
 import stem.communication.macros.RpcMacro
@@ -30,19 +29,18 @@ object AccountEntity {
           case _ =>
             ignore
         }
-        .mapError(errorHandler)
     }
 
     @MethodId(2)
     def credit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = accessCombinator { ops =>
       import ops._
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case account: ActiveAccount =>
           if (account.processedTransactions(transactionId.value)) {
             ignore
           } else {
             append(AccountCredited(transactionId.value, Some(amount)))
-          }.mapError(errorHandler)
+          }
         case _ =>
           reject("Account does not exist")
       }
@@ -51,13 +49,13 @@ object AccountEntity {
     @MethodId(3)
     def debit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = accessCombinator { ops =>
       import ops._
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case account: ActiveAccount =>
           if (account.processedTransactions(transactionId.value)) {
             ignore
           } else {
             if (account.available.getOrElse(BigDecimal(0)) > amount) {
-              append(AccountDebited(transactionId.value, Some(amount))).mapError(errorHandler)
+              append(AccountDebited(transactionId.value, Some(amount)))
             } else {
               reject("Insufficient funds")
             }

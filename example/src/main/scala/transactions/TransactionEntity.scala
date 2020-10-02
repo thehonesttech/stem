@@ -33,15 +33,14 @@ object TransactionEntity {
           case _ =>
             ignore
         }
-        .mapError(errorHandler)
     }
 
     @MethodId(2)
     def authorise: SIO[Unit] = accessCombinator { ops =>
       import ops._
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case _: InitialTransaction =>
-          append(TransactionAuthorized()).mapError(errorHandler)
+          append(TransactionAuthorized())
         case _ =>
           reject("Auth in progress, cannot auth twice")
       }
@@ -52,12 +51,12 @@ object TransactionEntity {
     def fail(reason: String): SIO[Unit] = accessCombinator { ops =>
       import ops._
 
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case inProgress: ActiveTransaction =>
           if (inProgress.status == TransactionStatus.Failed) {
             ignore
           } else {
-            append(TransactionFailed(reason)).mapError(errorHandler)
+            append(TransactionFailed(reason))
           }
         case _ =>
           reject("Transaction not found")
@@ -67,12 +66,12 @@ object TransactionEntity {
     @MethodId(4)
     def succeed: SIO[Unit] = accessCombinator { ops =>
       import ops._
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case inProgress: ActiveTransaction =>
           if (inProgress.status == TransactionStatus.Succeeded) {
             ignore
           } else if (inProgress.status == TransactionStatus.Authorized) {
-            append(TransactionSucceeded()).mapError(errorHandler)
+            append(TransactionSucceeded())
           } else {
             reject("Illegal transition")
           }
@@ -84,7 +83,7 @@ object TransactionEntity {
     @MethodId(4)
     def getInfo: SIO[TransactionInfo] = accessCombinator { ops =>
       import ops._
-      read.mapError(errorHandler).flatMap {
+      read.flatMap {
         case ActiveTransaction(amount, from, to, status) =>
           IO.succeed(TransactionInfo(from, to, amount.getOrElse(BigDecimal(0)), status == Succeeded))
         case _ =>

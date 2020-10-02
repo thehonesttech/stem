@@ -49,12 +49,13 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   key: Key,
   state: Ref[Option[State]],
   userBehaviour: Fold[State, Event],
+  errorHandler: Throwable => Reject,
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
 ) extends AlgebraCombinators[State, Event, Reject] {
   import algebraCombinatorConfig._
   type Offset = Long
 
-  override def read: Task[State] = {
+  override def read: IO[Reject, State] = {
     val result = state.get.flatMap {
       case Some(state) =>
         IO.succeed(state)
@@ -68,27 +69,27 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
     result
   }
 
-  override def append(es: Event, other: Event*): Task[Unit] = {
+  override def append(es: Event, other: Event*): IO[Reject, Unit] = {
     //append event and store offset
     // read the offset by key
     for {
       offset <- getOffset
       events: NonEmptyChunk[Event] = NonEmptyChunk(es, other: _*)
       currentState <- read
-      newState     <- userBehaviour.init(currentState).run(events)
+      newState     <- userBehaviour.init(currentState).run(events).mapError(errorHandler)
       _            <- state.set(Some(newState))
-      _            <- eventJournal.append(key, offset, events).provide(tagging)
-      _            <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState))
-      _            <- eventJournalOffsetStore.setValue(key, offset + events.size)
+      _            <- eventJournal.append(key, offset, events).mapError(errorHandler).provide(tagging)
+      _            <- snapshotting.snapshot(key, Versioned(offset, currentState), Versioned(offset + events.size, newState)).mapError(errorHandler)
+      _            <- eventJournalOffsetStore.setValue(key, offset + events.size).mapError(errorHandler)
     } yield ()
   }
 
   override def reject[A](r: Reject): IO[Reject, A] = IO.fail(r)
 
-  private def getOffset: Task[Offset] = eventJournalOffsetStore.getValue(key).map(_.getOrElse(0L))
+  private def getOffset: IO[Reject, Offset] = eventJournalOffsetStore.getValue(key).bimap(errorHandler, _.getOrElse(0L))
 
-  private def recover: Task[State] = {
-    snapshotting.load(key).flatMap { versionedStateMaybe =>
+  private def recover: IO[Reject, State] = {
+    snapshotting.load(key).mapError(errorHandler).flatMap { versionedStateMaybe =>
       // if nothing there, get initial state
       // I need current offset from offset store
       val (offset, readStateFromSnapshot) =
@@ -114,9 +115,9 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
                     }
                   )
             }
-            .map(_._1)
+            .bimap(errorHandler, _._1)
 
-        case _ => Task.succeed(readStateFromSnapshot)
+        case _ => IO.succeed(readStateFromSnapshot)
 
       }
 
@@ -129,6 +130,7 @@ object KeyedAlgebraCombinators {
   def fromParams[Key: Tag, State: Tag, Event: Tag, Reject](
     key: Key,
     userBehaviour: Fold[State, Event],
+    errorHandler: Throwable => Reject,
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
   ): ZIO[Any, Nothing, KeyedAlgebraCombinators[Key, State, Event, Reject]] =
     Ref
@@ -138,6 +140,7 @@ object KeyedAlgebraCombinators {
           key,
           state,
           userBehaviour,
+          errorHandler,
           algebraCombinatorConfig
         )
       }
