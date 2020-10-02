@@ -134,7 +134,7 @@ object LedgerInboundMessageHandling {
         instructionMessage match {
           case Creation(transactionId, accountId, amount) =>
             ledgerLogic
-              .create(transactionId, accountId, amount.getOrElse(BigDecimal(0)))
+              .create(transactionId, accountId, amount)
               .as()
               .provideLayer(LedgerServer.emptyCombinators)
           case Authorization(transactionId) =>
@@ -164,22 +164,12 @@ object LedgerGrpcService {
   type Transactions = TransactionId => TransactionCommandHandler
 
   val service: ZIO[Has[LedgerLogic], Nothing, ZioService.ZLedger[ZEnv, Any]] = ZIO.access { layer =>
-//    val ledgers = layer.get[Accounts]
     val ledgerLogic = layer.get[LedgerLogic]
     new ZioService.ZLedger[ZEnv, Any] {
 
-//      override def lock(request: LockRequest): ZIO[ZEnv, Status, LockReply] = {
-//        (for {
-//          reply <- ledgers(request.id)
-//            .lock(request.amount, request.idempotencyKey)
-//            .provideCombinator
-//          _ <- console.putStrLn(reply.toString)
-//        } yield LockReply().withMessage(reply.toString)).orElseFail(Status.NOT_FOUND)
-//      }
-
       override def create(request: CreateRequest): ZIO[ZEnv, Status, CreateReply] =
         ledgerLogic
-          .create(request.transactionId, request.accountId, request.amount.getOrElse(BigDecimal(0)))
+          .create(request.transactionId, request.accountId, request.amount)
           .bimap(_ => Status.NOT_FOUND, _ => CreateReply().withMessage("Created"))
           .provideLayer(emptyCombinators)
 

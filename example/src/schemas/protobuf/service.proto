@@ -22,23 +22,10 @@ service Ledger {
 }
 
 // The request message containing the user's name.
-//message LockRequest {
-//    string id = 1;
-//    string accountId = 2;
-//    stem.commons.BigDecimal amount = 3;
-//    string idempotencyKey = 4;
-//}
-
-// The response message containing the greetings
-//message LockReply {
-//    string message = 1;
-//}
-
-// The request message containing the user's name.
 message CreateRequest {
     string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
     string accountId = 2 [(scalapb.field).type = "accounts.AccountId"];
-    stem.commons.BigDecimal amount = 3;
+    stem.commons.BigDecimal amount = 3 [(scalapb.field).no_box = true];
 }
 
 // The response message containing the greetings

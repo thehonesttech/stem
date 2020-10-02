@@ -29,7 +29,7 @@ object TransactionEntity {
       read
         .flatMap {
           case _: ActiveTransaction =>
-            append(TransactionCreated(from = from, to = to, amount = Some(amount)))
+            append(TransactionCreated(from = from, to = to, amount))
           case _ =>
             ignore
         }
@@ -85,7 +85,7 @@ object TransactionEntity {
       import ops._
       read.flatMap {
         case ActiveTransaction(amount, from, to, status) =>
-          IO.succeed(TransactionInfo(from, to, amount.getOrElse(BigDecimal(0)), status == Succeeded))
+          IO.succeed(TransactionInfo(from, to, amount, status == Succeeded))
         case _ =>
           reject("Transaction not found")
       }

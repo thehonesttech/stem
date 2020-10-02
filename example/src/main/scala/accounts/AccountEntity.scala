@@ -9,9 +9,10 @@ import stem.communication.macros.annotations.MethodId
 import stem.data.AlgebraCombinators.accessCombinator
 import stem.data.{EventTag, StemProtocol, Tagging}
 import stem.runtime.Fold
+import stem.runtime.Fold.impossible
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
-import zio.{Runtime, Task}
+import zio.{IO, Runtime, Task}
 
 object AccountEntity {
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
@@ -39,7 +40,7 @@ object AccountEntity {
           if (account.processedTransactions(transactionId.value)) {
             ignore
           } else {
-            append(AccountCredited(transactionId.value, Some(amount)))
+            append(AccountCredited(transactionId.value, amount))
           }
         case _ =>
           reject("Account does not exist")
@@ -54,8 +55,8 @@ object AccountEntity {
           if (account.processedTransactions(transactionId.value)) {
             ignore
           } else {
-            if (account.available.getOrElse(BigDecimal(0)) > amount) {
-              append(AccountDebited(transactionId.value, Some(amount)))
+            if (account.balance > amount) {
+              append(AccountDebited(transactionId.value, amount))
             } else {
               reject("Insufficient funds")
             }
@@ -66,15 +67,6 @@ object AccountEntity {
 
     }
 
-//    @MethodId(4)
-//    def lock(amount: BigDecimal, idempotencyKey: String): SIO[LockResponse] = accessCombinator { ops =>
-//      import ops._
-//      (for {
-//        state <- read
-//        _     <- append(AmountLocked(amount = Some(amount), idempotencyKey = idempotencyKey))
-//      } yield Allowed).mapError(errorHandler)
-//    }
-
   }
 
   val errorHandler: Throwable => String = _.getMessage
@@ -82,15 +74,22 @@ object AccountEntity {
   val eventHandlerLogic: Fold[AccountState, AccountEvent] = Fold(
     initial = EmptyAccount(),
     reduce = {
-      case (oldState, event) =>
-        val newState = event match {
-          case locked: AmountLocked =>
-            ActiveAccount(locked = locked.amount)
-          case released: LockReleased =>
-            EmptyAccount()
-          case _ => EmptyAccount()
-        }
-        Task.succeed(newState)
+      case (_: EmptyAccount, AccountOpened()) =>
+        IO.succeed(ActiveAccount(BigDecimal(0), Set.empty))
+
+      case (active: ActiveAccount, AccountDebited(transactionId, amount)) =>
+        IO.succeed(
+          active
+            .withBalance(active.balance - amount)
+            .withProcessedTransactions(active.processedTransactions + transactionId)
+        )
+      case (active: ActiveAccount, AccountCredited(transactionId, amount)) =>
+        IO.succeed(
+          active
+            .withBalance(active.balance + amount)
+            .withProcessedTransactions(active.processedTransactions + transactionId)
+        )
+      case _ => impossible
     }
   )
 

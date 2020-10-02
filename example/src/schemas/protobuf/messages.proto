@@ -22,7 +22,7 @@ message LedgerInstructionsMessage {
 message Creation {
     string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
     string accountId = 2 [(scalapb.field).type = "accounts.AccountId"];
-    stem.commons.BigDecimal amount = 3;
+    stem.commons.BigDecimal amount = 3 [(scalapb.field).no_box = true];
 }
 
 message Authorization {
