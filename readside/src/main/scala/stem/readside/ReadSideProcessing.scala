@@ -11,7 +11,7 @@ import stem.readside.ReadSideProcessing.{KillSwitch, _}
 import stem.readside.ReadSideWorkerActor.KeepRunning
 import zio.clock.Clock
 import zio.stream.ZStream
-import zio.{Has, Runtime, Task, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, IO, Runtime, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
 
 import scala.concurrent.duration.{FiniteDuration, _}
 
@@ -20,8 +20,8 @@ trait ReadSideProcessing {
   def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch]
 }
 
-trait ReadSideProcessor {
-  def readSideStream: ZStream[Clock, Throwable, KillSwitch]
+trait ReadSideProcessor[Reject] {
+  def readSideStream: ZStream[Clock, Reject, KillSwitch]
 }
 
 final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing {
@@ -78,7 +78,7 @@ object ReadSideProcessing {
 
   final case class KillSwitch(shutdown: Task[Unit]) extends AnyVal
 
-  final case class RunningProcess(watchTermination: Task[Unit], shutdown: Task[Unit])
+  final case class RunningProcess(watchTermination: Task[Unit], shutdown: UIO[Unit])
 
   final case class Process(run: Task[RunningProcess]) extends AnyVal
 

@@ -161,8 +161,6 @@ class DeriveMacros(val c: blackbox.Context) {
             else {
               val paramTypes = paramList.flatten.map(_.tpt)
               val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
-              // return tuple with try in the state of unpickle generic
-              //we should unpickle the result as well
 
               q"""
                val codecInput = codec[$TupleNCons[..$paramTypes]]
@@ -190,7 +188,7 @@ class DeriveMacros(val c: blackbox.Context) {
               } yield vector
               """
           q"""
-             if (hint == $hintToUse)  { $invocation } else $acc"""
+             if (hint == $hintToUse) { $invocation } else $acc"""
       }
     }
 

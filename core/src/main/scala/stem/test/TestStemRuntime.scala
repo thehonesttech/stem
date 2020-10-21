@@ -39,43 +39,44 @@ object TestStemRuntime {
   case class TestMessage[K, V](key: K, value: V)
 
   object TestReadSideProcessor {
-    trait TestReadSideProcessor {
+    trait TestReadSideProcessor[Reject] {
       def triggerReadSideProcessing: URIO[TestClock, Unit]
 
-      def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Throwable, Unit]
+      def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit]
 
     }
 
-    def memory[Id: Tag, Event: Tag, Offset: Tag]
-      : ZLayer[Has[ReadSideParams[Id, Event]] with Has[CommittableJournalQuery[Offset, Id, Event]], Nothing, Has[ReadSideProcessor] with Has[
-        TestReadSideProcessor
-      ]] = {
+    def memory[Id: Tag, Event: Tag, Offset: Tag, Reject: Tag](
+      errorHandler: Throwable => Reject
+    ): ZLayer[Has[ReadSideParams[Id, Event, Reject]] with Has[CommittableJournalQuery[Offset, Id, Event]], Nothing, Has[ReadSideProcessor[Reject]] with Has[
+      TestReadSideProcessor[Reject]
+    ]] = {
       ZIO
-        .access[Has[ReadSideParams[Id, Event]] with Has[CommittableJournalQuery[Offset, Id, Event]]] { layer =>
-          val readSideParams = layer.get[ReadSideParams[Id, Event]]
+        .access[Has[ReadSideParams[Id, Event, Reject]] with Has[CommittableJournalQuery[Offset, Id, Event]]] { layer =>
+          val readSideParams = layer.get[ReadSideParams[Id, Event, Reject]]
           val committableJournalQuery = layer.get[CommittableJournalQuery[Offset, Id, Event]]
           val readSideProcessing = ReadSideProcessing.memory
           implicit val runtime = Runtime.default
-          val stream: ZStream[Clock, Throwable, KillSwitch] =
+          val stream: ZStream[Clock, Reject, KillSwitch] =
             StemApp
-              .readSideStream[Id, Event, Offset](readSideParams)
+              .readSideStream[Id, Event, Offset, Reject](readSideParams, errorHandler)
               .provideSomeLayer[Clock](readSideProcessing ++ ZLayer.succeed(committableJournalQuery))
-          val el = new ReadSideProcessor with TestReadSideProcessor {
-            override val readSideStream: ZStream[Clock, Throwable, KillSwitch] = stream
+          val el = new ReadSideProcessor[Reject] with TestReadSideProcessor[Reject] {
+            override val readSideStream: ZStream[Clock, Reject, KillSwitch] = stream
 
             override def triggerReadSideProcessing: URIO[TestClock, Unit] = TestClock.adjust(100.millis)
 
-            def consume(n: Int): URIO[Clock with Blocking, Fiber.Runtime[Throwable, Unit]] =
+            def consume(n: Int): URIO[Clock with Blocking, Fiber.Runtime[Reject, Unit]] =
               stream.take(n).runDrain.fork
 
-            override def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Throwable, Unit] =
+            override def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit] =
               for {
                 fiber <- consume(n)
                 _     <- triggerReadSideProcessing
                 _     <- fiber.join
               } yield ()
           }
-          Has.allOf[ReadSideProcessor, TestReadSideProcessor](el, el)
+          Has.allOf[ReadSideProcessor[Reject], TestReadSideProcessor[Reject]](el, el)
         }
         .toLayerMany
     }

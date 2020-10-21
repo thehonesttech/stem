@@ -80,7 +80,7 @@ object TransactionEntity {
       }
     }
 
-    @MethodId(4)
+    @MethodId(5)
     def getInfo: SIO[TransactionInfo] = accessCombinator { ops =>
       import ops._
       read.flatMap {

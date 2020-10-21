@@ -35,20 +35,20 @@ object StemApp {
       Managed.make(Task(ActorSystem(name, ConfigFactory.load(confFileName))))(sys => Task.fromFuture(_ => sys.terminate()).either)
     )
 
-  def readSideStream[Id: Tag, Event: Tag, Offset: Tag](readSideParams: ReadSideParams[Id, Event])(
+  def readSideStream[Id: Tag, Event: Tag, Offset: Tag, Reject](readSideParams: ReadSideParams[Id, Event, Reject], errorHandler: Throwable => Reject)(
     implicit runtime: Runtime[ZEnv]
-  ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] = {
+  ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] = {
     // simplify and then improve it
     ZStream.accessStream { layers =>
       val readSideProcessing = layers.get[ReadSideProcessing]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
-      val sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
-        journal.eventsByTag(tag, readSideParams.consumerId)
+      val sources: Seq[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
+        journal.eventsByTag(tag, readSideParams.consumerId).mapError(errorHandler)
       }
       // convert into process
       ZStream.fromEffect(buildStreamAndProcesses(sources)).flatMap {
         case (streams, processes) =>
-          ZStream.fromEffect(readSideProcessing.start(readSideParams.name, processes.toList)).flatMap { ks =>
+          ZStream.fromEffect(readSideProcessing.start(readSideParams.name, processes.toList).mapError(errorHandler)).flatMap { ks =>
             // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
             streams
               .map { stream =>
@@ -58,7 +58,7 @@ object StemApp {
                     val commit = element.commit
                     val key = journalEntry.event.entityKey
                     val event = journalEntry.event.payload
-                    readSideParams.logic(key, event).retry(Schedule.fixed(1.second)) <* commit
+                    readSideParams.logic(key, event).retry(Schedule.fixed(1.second)) <* commit.mapError(errorHandler)
                   }
               }
               .flattenPar(sources.size)
@@ -68,24 +68,31 @@ object StemApp {
     }
   }
 
-  def readSideSubscription[Id: Tag, Event: Tag, Offset: Tag](
-    readsideParams: ReadSideParams[Id, Event]
-  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Throwable, KillSwitch] =
-    readSideStream[Id, Event, Offset](readsideParams).runLast.map(_.getOrElse(KillSwitch(Task.unit)))
+  def readSideSubscription[Id: Tag, Event: Tag, Offset: Tag, Reject](
+    readsideParams: ReadSideParams[Id, Event, Reject],
+    errorHandler: Throwable => Reject
+  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] =
+    readSideStream[Id, Event, Offset, Reject](readsideParams, errorHandler).runLast.map(_.getOrElse(KillSwitch(Task.unit)))
 
-  case class ReadSideParams[Id, Event](name: String, consumerId: ConsumerId, tagging: Tagging[Id], parallelism: Int = 30, logic: (Id, Event) => Task[Unit])
+  case class ReadSideParams[Id, Event, Reject](
+    name: String,
+    consumerId: ConsumerId,
+    tagging: Tagging[Id],
+    parallelism: Int = 30,
+    logic: (Id, Event) => IO[Reject, Unit]
+  )
 
-  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag](
-    sources: Seq[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]]
+  private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag, Reject](
+    sources: Seq[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]]
   ) = {
     for {
-      queue <- Queue.bounded[ZStream[Clock, Throwable, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
+      queue <- Queue.bounded[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
       processes = sources.map { s =>
         Process {
           for {
-            stopped <- zio.Promise.make[Throwable, Unit]
+            stopped <- zio.Promise.make[Reject, Unit]
             fiber   <- (queue.offer(s.interruptWhen(stopped)) *> stopped.await).fork
-          } yield RunningProcess(fiber.join.unit, stopped.succeed().unit)
+          } yield RunningProcess(fiber.join.unit.mapError(cause => new RuntimeException("Failure " + cause)), stopped.succeed().unit)
         }
       }
     } yield (ZStream.fromQueue(queue), processes)

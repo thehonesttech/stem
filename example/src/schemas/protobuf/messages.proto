@@ -14,19 +14,20 @@ option (scalapb.options) = {
 message LedgerInstructionsMessage {
 
     oneof sealed_value {
-        Creation creation = 1;
-        Authorization authorization = 2;
+        OpenAccountMessage creation = 1;
+        AuthorizePaymentMessage authorization = 2;
     }
 }
 
-message Creation {
-    string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
-    string accountId = 2 [(scalapb.field).type = "accounts.AccountId"];
-    stem.commons.BigDecimal amount = 3 [(scalapb.field).no_box = true];
+message OpenAccountMessage {
+    string accountId = 1 [(scalapb.field).type = "accounts.AccountId"];
 }
 
-message Authorization {
+message AuthorizePaymentMessage {
     string transactionId = 1 [(scalapb.field).type = "transactions.TransactionId"];
+    string from = 2 [(scalapb.field).type = "accounts.AccountId"];
+    string to = 3 [(scalapb.field).type = "accounts.AccountId"];
+    stem.commons.BigDecimal amount = 4 [(scalapb.field).no_box = true];
 }
 
 message LedgerId {
