@@ -3,8 +3,7 @@ package stem.runtime
 import izumi.reflect.Tag
 import stem.data.AlgebraCombinators.ImpossibleTransitionException
 import stem.data.{AlgebraCombinators, Tagging, Versioned}
-import stem.journal.{EventJournal, MemoryEventJournal}
-import stem.runtime.readside.JournalQuery
+import stem.journal.EventJournal
 import stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import zio.{Ref, _}
 
@@ -172,7 +171,8 @@ final case class Fold[State, Event](initial: State, reduce: (State, Event) => Ta
 
 object Fold {
   object ImpossibleException extends RuntimeException
-  val impossible = Task.fail(ImpossibleException)
+  // TODO: add proper log
+  val impossible = Task.effectTotal(println("Impossible state exception")) *> Task.fail(ImpossibleException)
   def count[A]: Fold[Long, A] =
     Fold(0L, (c, _) => Task.succeed(c + 1L))
 }

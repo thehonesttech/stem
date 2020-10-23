@@ -40,9 +40,9 @@ object TestStemRuntime {
 
   object TestReadSideProcessor {
     trait TestReadSideProcessor[Reject] {
-      def triggerReadSideProcessing: URIO[TestClock, Unit]
+      def triggerReadSideProcessing(triggerTimes: Int): URIO[TestClock, Unit]
 
-      def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit]
+      def triggerReadSideAndWaitFor(triggerTimes: Int, messagesToWaitFor: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit]
 
     }
 
@@ -64,15 +64,15 @@ object TestStemRuntime {
           val el = new ReadSideProcessor[Reject] with TestReadSideProcessor[Reject] {
             override val readSideStream: ZStream[Clock, Reject, KillSwitch] = stream
 
-            override def triggerReadSideProcessing: URIO[TestClock, Unit] = TestClock.adjust(100.millis)
+            override def triggerReadSideProcessing(triggerTimes: Int): URIO[TestClock, Unit] = TestClock.adjust((triggerTimes * 100).millis)
 
             def consume(n: Int): URIO[Clock with Blocking, Fiber.Runtime[Reject, Unit]] =
               stream.take(n).runDrain.fork
 
-            override def triggerReadSideAndWaitFor(n: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit] =
+            override def triggerReadSideAndWaitFor(triggerTimes: Int, messagesToWaitFor: Int): ZIO[TestClock with Clock with Blocking, Reject, Unit] =
               for {
-                fiber <- consume(n)
-                _     <- triggerReadSideProcessing
+                fiber <- consume(messagesToWaitFor)
+                _     <- triggerReadSideProcessing(triggerTimes)
                 _     <- fiber.join
               } yield ()
           }

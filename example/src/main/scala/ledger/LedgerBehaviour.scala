@@ -45,7 +45,7 @@ object LedgerServer extends ServerMain {
   private val runtimeLayers = actorSystem >+> (StemApp.liveRuntime[TransactionId, TransactionEvent] ++ StemApp.liveRuntime[AccountId, AccountEvent])
   private val entities = runtimeLayers to (AccountEntity.live ++ TransactionEntity.live)
 
-  private val ledgerLogicLayer = entities to ReadSideLogic.live
+  private val ledgerLogicLayer = entities to ProcessReadSide.live
 
   private val readSideProcessor = ledgerLogicLayer and runtimeLayers to TransactionReadSideProcessor.live
 
@@ -68,7 +68,7 @@ object LedgerServer extends ServerMain {
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
 
-class ReadSideLogic(accounts: Accounts, transactions: Transactions) {
+class ProcessReadSide(accounts: Accounts, transactions: Transactions) {
 
   // TODO readside should use reject type
   def process(transactionId: TransactionId, transactionEvent: TransactionEvent): IO[String, Unit] = {
@@ -104,9 +104,9 @@ class ReadSideLogic(accounts: Accounts, transactions: Transactions) {
   }
 }
 
-object ReadSideLogic {
-  val live = ZLayer.fromServices[Accounts, Transactions, ReadSideLogic] { (accounts: Accounts, transactions: Transactions) =>
-    new ReadSideLogic(accounts, transactions)
+object ProcessReadSide {
+  val live = ZLayer.fromServices[Accounts, Transactions, ProcessReadSide] { (accounts: Accounts, transactions: Transactions) =>
+    new ProcessReadSide(accounts, transactions)
   }
 }
 
@@ -114,21 +114,13 @@ object TransactionReadSideProcessor {
 
   implicit val runtime: Runtime[ZEnv] = LedgerServer
 
-  /*private val readSideLogic: ZIO[Console, Nothing, (AccountId, AccountEvent) => IO[String, Unit]] = ZIO.access { layer =>
-    val cons = layer.get
-    (key: AccountId, event: AccountEvent) => {
-      cons.putStrLn(s"Arrived $key")
-    }
-  }
-  val readSideParams = readSideLogic.map(logic => ReadSideParams("LedgerReadSide", ConsumerId("processing"), tagging, 30, logic))*/
-
-  val readsideParams: ZIO[Has[ReadSideLogic], Nothing, ReadSideParams[TransactionId, TransactionEvent, String]] =
-    ZIO.access[Has[ReadSideLogic]] { layer =>
-      ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ReadSideLogic].process)
+  val readsideParams: ZIO[Has[ProcessReadSide], Nothing, ReadSideParams[TransactionId, TransactionEvent, String]] =
+    ZIO.access[Has[ProcessReadSide]] { layer =>
+      ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ProcessReadSide].process)
     }
 
   val live: ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with Has[
-    ReadSideLogic
+    ProcessReadSide
   ], String, Has[
     ReadSideProcessing.KillSwitch
   ]] = {

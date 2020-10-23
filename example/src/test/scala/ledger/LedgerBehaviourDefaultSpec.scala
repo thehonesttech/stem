@@ -5,7 +5,7 @@ import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
 import ledger.LedgerGrpcService.{Accounts, Transactions}
 import ledger.LedgerInboundMessageHandling.messageHandling
 import ledger.LedgerTest._
-import ledger.communication.grpc.ZioService
+import ledger.communication.grpc.{AuthorizeReply, AuthorizeRequest, OpenAccountReply, OpenAccountRequest, ZioService}
 import ledger.eventsourcing.events.{AccountCredited, AccountEvent, AccountOpened, AccountState, ActiveAccount, EmptyAccount, TransactionEvent, TransactionState}
 import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage}
 import stem.communication.kafka.MessageConsumer
@@ -16,8 +16,7 @@ import stem.test.{StemtityProbe, TestStemRuntime}
 import transactions.TransactionEntity.{transactionProtocol, TransactionCommandHandler}
 import transactions.{TransactionEntity, TransactionId}
 import zio.duration.durationInt
-import zio.test.Assertion._
-import zio.test.Assertion.{equalTo, hasSameElements, isNone, isSome}
+import zio.test.Assertion.{equalTo, hasSameElements, isNone, isSome, _}
 import zio.test.Eql._
 import zio.test._
 import zio.test.environment.TestConsole
@@ -45,25 +44,42 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId")))) &&
           assert(stateFromSnapshot)(equalTo(Option(Versioned(2, ActiveAccount(10, Set("transactionId")): AccountState))))
         }).provideLayer(env)
-      })
-      /*  suite("End to end test with memory implementations")(
+      }),
+      suite("End to end test with memory implementations")(
         testM("End to end test using grpc service") {
-          val key = "key4"
+          val accountIdFrom = AccountId("account1")
+          val accountIdTo = AccountId("account2")
+          val anAccountTransactionId = AccountTransactionId("creditTransactionId")
+          val transactionId = TransactionId("transactionId")
           //call grpc service, check events and state, advance time, read side view, send with kafka
           (for {
-            (_, account, transaction) <- ledgerLogicAndProbes
+            // (_, account, transaction) <- ledgerLogicAndProbes
+            (accounts, accountsProbe) <- accountsAndProbes
             service                   <- ledgerGrpcService
-            lockReply                 <- service.lock(LockRequest(key, "accountId1", BigDecimal(10), "idempotency1"))
-            stateInitial              <- probe(key).state
-            readSide                  <- readSideClient
-            _                         <- readSide.triggerReadSideAndWaitFor(1)
-            console                   <- TestConsole.output
+            openAccountResponse       <- service.openAccount(OpenAccountRequest(accountIdFrom))
+            openAccount2Response      <- service.openAccount(OpenAccountRequest(accountIdTo))
+
+            stateInitialTo   <- accountsProbe(accountIdTo).state
+            _                <- accounts(accountIdFrom).credit(anAccountTransactionId, BigDecimal(20))
+            stateInitialFrom <- accountsProbe(accountIdFrom).state
+            result           <- service.authorizePayment(AuthorizeRequest(transactionId, accountIdFrom, accountIdTo, BigDecimal(10)))
+
+            transactionReadSide <- readSideClient
+            _                   <- transactionReadSide.triggerReadSideAndWaitFor(triggerTimes = 2, messagesToWaitFor = 2)
+            updatedState        <- accountsProbe(accountIdTo).state
+
+            // readSide                  <- readSideClient
+            // _                         <- readSide.triggerReadSideAndWaitFor(1)
+            //console                   <- TestConsole.output
           } yield {
-            assert(lockReply)(equalTo(LockReply("Allowed"))) &&
-            assert(stateInitial)(equalTo(EmptyAccount())) &&
-            assert(console)(equalTo(Vector("Allowed\n", "Arrived key4\n")))
+            assert(openAccountResponse)(equalTo(OpenAccountReply("Created"))) &&
+            assert(openAccount2Response)(equalTo(OpenAccountReply("Created"))) &&
+            assert(stateInitialTo)(equalTo(ActiveAccount(0, Set()))) &&
+            assert(stateInitialFrom)(equalTo(ActiveAccount(20, Set("creditTransactionId")))) &&
+            assert(result)(equalTo(AuthorizeReply("Created"))) &&
+            assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId"))))
           }).provideLayer(env)
-        },
+        } /*
         testM("End to end test using Kafka") {
           //call grpc service, check events and state, advance time, read side view, send with kafka
           val accountId = "accountId1"
@@ -81,8 +97,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             assert(stateInitial)(equalTo(EmptyAccount())) &&
             assert(console)(equalTo(Vector("Arrived accountId1\n")))
           }).provideLayer(env)
-        }
-      )*/
+        }*/
+      )
     )
 
   // real from stubbed are these modules: readSideProcessing, memoryStores and testStem/stem
@@ -107,13 +123,13 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
     )
 
     val transactionsAndAccounts = transactions and accounts
-    val readSideLogic = transactionsAndAccounts to ReadSideLogic.live
-    val grpc = transactionsAndAccounts and readSideLogic to LedgerGrpcService.live
-    val readSide = transactions and (readSideLogic to TransactionReadSideProcessor.readsideParams.toLayer) to TestReadSideProcessor
+    val processReadSide = transactionsAndAccounts to ProcessReadSide.live
+    val grpc = transactionsAndAccounts and processReadSide to LedgerGrpcService.live
+    val readSide = transactions and (processReadSide to TransactionReadSideProcessor.readsideParams.toLayer) to TestReadSideProcessor
         .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler)
-    val consumer = transactionsAndAccounts and readSideLogic to testMessageConsumer
+    val consumer = transactionsAndAccounts and processReadSide to testMessageConsumer
 
-    transactionsAndAccounts ++ readSideLogic ++ grpc ++ readSide ++ consumer
+    transactionsAndAccounts ++ processReadSide ++ grpc ++ readSide ++ consumer
   }
 }
 

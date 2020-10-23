@@ -28,7 +28,7 @@ object TransactionEntity {
       import ops._
       read
         .flatMap {
-          case _: ActiveTransaction =>
+          case _: InitialTransaction =>
             append(TransactionCreated(from = from, to = to, amount))
           case _ =>
             ignore
@@ -39,7 +39,7 @@ object TransactionEntity {
     def authorise: SIO[Unit] = accessCombinator { ops =>
       import ops._
       read.flatMap {
-        case _: InitialTransaction =>
+        case _: ActiveTransaction =>
           append(TransactionAuthorized())
         case _ =>
           reject("Auth in progress, cannot auth twice")
@@ -99,6 +99,7 @@ object TransactionEntity {
     reduce = {
       case (InitialTransaction(), TransactionCreated(from, to, amount)) => IO.succeed(ActiveTransaction(amount, from, to, TransactionStatus.Requested))
       case (state: ActiveTransaction, TransactionAuthorized())          => IO.succeed(state.copy(status = TransactionStatus.Authorized))
+      case (state: ActiveTransaction, TransactionSucceeded())           => IO.succeed(state.copy(status = TransactionStatus.Succeeded))
       case _                                                            => impossible
     }
   )
