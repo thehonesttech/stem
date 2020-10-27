@@ -1,6 +1,6 @@
 package transactions
 
-import accounts.{AccountId, AccountTransactionId}
+import accounts.AccountId
 import ledger.LedgerServer
 import ledger.eventsourcing.events.TransactionStatus.Succeeded
 import ledger.eventsourcing.events._
@@ -14,7 +14,7 @@ import stem.runtime.Fold
 import stem.runtime.Fold.impossible
 import stem.runtime.akka.StemRuntime.memoryStemtity
 import stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
-import zio.{IO, Runtime, Task}
+import zio.{IO, Runtime}
 
 object TransactionEntity {
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
@@ -107,7 +107,7 @@ object TransactionEntity {
   implicit val transactionProtocol: StemProtocol[TransactionCommandHandler, TransactionState, TransactionEvent, String] =
     RpcMacro.derive[TransactionCommandHandler, TransactionState, TransactionEvent, String]
 
-  val tagging = Tagging.const(EventTag("Transaction"))
+  val tagging: Tagging.Const[Any] = Tagging.const(EventTag("Transaction"))
 
   val live = memoryStemtity[TransactionId, TransactionCommandHandler, TransactionState, TransactionEvent, String](
     "Transaction",
@@ -119,7 +119,7 @@ object TransactionEntity {
 case class TransactionId(value: String) extends AnyVal
 
 object TransactionId {
-  implicit val typeMapper = TypeMapper(TransactionId.apply)(_.value)
+  implicit val typeMapper: TypeMapper[String, TransactionId] = TypeMapper(TransactionId.apply)(_.value)
   implicit val keyEncoder: KeyEncoder[TransactionId] = (a: TransactionId) => a.value
   implicit val keyDecoder: KeyDecoder[TransactionId] = (key: String) => Some(TransactionId(key))
 }

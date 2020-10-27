@@ -55,18 +55,15 @@ object AccountEntity {
           if (account.processedTransactions(transactionId.value)) {
             ignore
           } else {
-            if (account.balance > amount) {
+            if (account.balance > amount)
               append(AccountDebited(transactionId.value, amount))
-            } else {
+            else
               reject("Insufficient funds")
-            }
           }
         case _ =>
           reject("Account does not exist")
       }
-
     }
-
   }
 
   val errorHandler: Throwable => String = _.getMessage

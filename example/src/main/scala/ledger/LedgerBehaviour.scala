@@ -70,7 +70,6 @@ object LedgerServer extends ServerMain {
 
 class ProcessReadSide(accounts: Accounts, transactions: Transactions) {
 
-  // TODO readside should use reject type
   def process(transactionId: TransactionId, transactionEvent: TransactionEvent): IO[String, Unit] = {
     transactionEvent match {
       case TransactionCreated(from, to, amount) =>
@@ -142,7 +141,7 @@ object LedgerInboundMessageHandling {
     ZIO.access { layer =>
       val accounts = layer.get[Accounts]
       val transactions = layer.get[Transactions]
-      (key: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
+      (_: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
         instructionMessage match {
           case OpenAccountMessage(accountId) =>
             accounts(accountId).open
@@ -172,7 +171,7 @@ object LedgerGrpcService {
   type Accounts = AccountId => AccountCommandHandler
   type Transactions = TransactionId => TransactionCommandHandler
 
-  val service: ZIO[Has[Accounts] with Has[Transactions], Nothing, ZioService.ZLedger[ZEnv, Any]] = ZIO.access { layer =>
+  private val service: ZIO[Has[Accounts] with Has[Transactions], Nothing, ZioService.ZLedger[ZEnv, Any]] = ZIO.access { layer =>
     val accounts = layer.get[Accounts]
     val transactions = layer.get[Transactions]
     new ZioService.ZLedger[ZEnv, Any] {
@@ -191,6 +190,6 @@ object LedgerGrpcService {
     }
   }
 
-  val live = service.toLayer
+  val live: ZLayer[Has[Accounts] with Has[Transactions], Nothing, Has[ZLedger[ZEnv, Any]]] = service.toLayer
 
 }
