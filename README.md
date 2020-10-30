@@ -13,12 +13,12 @@ The **example** project contains code and test of a possible implementation of a
 
 Some features of the library/framework:
 
-####ZIO
+### ZIO
 Effect management allows a better approach to tests and to functional programming.
 ZIO is the effect and stream library of choice.
 Thanks to ZIO, we can test our code with stubbed time and console, making sure tests run quickly and deterministically.
 
-####RPC style Entities
+### RPC style Entities
 DDD Entities in Stem, usually called Stemtities, use Akka (Cluster) and a macro in order to
 allow RPC style invocation. Amount of boilerplate code is drastically reduced and an entity can be invoked
 as a normal class.
@@ -29,7 +29,7 @@ The library will distribute the request in the cluster and serialize commands us
 The optional annotation `@MethodId` can be used to maintain schema compatibility if method is renamed.
 The id used will be the unique number set in the annotation.
 
-####GRPC and Protobuf
+### GRPC and Protobuf
 One of the problem we had with other frameworks was the schema evolution.
 Schema evolution allows to evolve your models (that needs to be persisted) without breaking deployments.
 This is a very important feature in a running system, and we believe it should be a first class concern.
@@ -46,7 +46,7 @@ We use Protobuf in every place we need schema evolution (p2p, events, state, kaf
 Schema evolution and great performance are the reason we chose Grpc (with ZIO-Grpc) in order to provide a P2P microservices way of communication.
  
 
-####Kafka
+### Kafka
 Kafka is - a publish-subscribe based durable messaging system exchanging data between processes, applications, and servers. It is particularly important in order to
 decouple microservices. This project uses the very good **ZIO-Kafka** library in order to deal with Kafka.
 
