@@ -72,17 +72,17 @@ def stemModule(id: String, description: String): Project =
   Project(id, file(s"$id"))
     .settings(moduleName := id, name := description)
 
-lazy val `core` = stemModule("core", "Core framework")
+lazy val `core` = stemModule("stem-core", "Core framework")
   .dependsOn(`data`, `readside`, `macros`)
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
   .settings(publishSettings)
-lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
+lazy val `data` = stemModule("stem-data", "Data structures").settings(libraryDependencies ++= allDeps)
   .settings(publishSettings)
 lazy val `readside` =
-  stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
+  stemModule("stem-readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
     .settings(publishSettings)
-lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
+lazy val `macros` = stemModule("stem-macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
   .settings(publishSettings)
 lazy val `example` = stemModule("example", "Ledger example")
   .dependsOn(`core`, `macros`, `readside`)
@@ -98,12 +98,12 @@ lazy val root = (project in file("."))
       List(
         organization := "io.github.thehonesttech",
         scalaVersion := "2.13.3",
-        version := "0.1.0-SNAPSHOT"
+        version := "0.1.1-SNAPSHOT"
       )
     ),
     name := "Stem",
     commonSettings
-  )
+  ).settings(noPublishSettings)
 
 val exampleDeps = Seq(
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0"
