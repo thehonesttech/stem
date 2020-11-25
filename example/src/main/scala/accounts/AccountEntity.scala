@@ -3,15 +3,15 @@ package accounts
 import ledger.LedgerServer
 import ledger.eventsourcing.events._
 import scalapb.TypeMapper
-import stem.StemApp
-import stem.communication.macros.RpcMacro
-import stem.communication.macros.annotations.MethodId
-import stem.data.AlgebraCombinators.accessCombinator
-import stem.data.{EventTag, StemProtocol, Tagging}
-import stem.runtime.Fold
-import stem.runtime.Fold.impossible
-import stem.runtime.akka.StemRuntime.memoryStemtity
-import stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
+import io.github.stem.StemApp
+import io.github.stem.communication.macros.RpcMacro
+import io.github.stem.communication.macros.annotations.MethodId
+import io.github.stem.data.AlgebraCombinators.accessCombinator
+import io.github.stem.data.{EventTag, StemProtocol, Tagging}
+import io.github.stem.runtime.Fold
+import io.github.stem.runtime.Fold.impossible
+import io.github.stem.runtime.akka.StemRuntime.memoryStemtity
+import io.github.stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
 import zio.{IO, Runtime, Task}
 
 object AccountEntity {

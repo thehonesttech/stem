@@ -23,7 +23,7 @@ message AccountState {
 }
 
 message ActiveAccount {
-  stem.commons.BigDecimal balance = 1 [(scalapb.field).no_box = true];
+  io.github.stem.commons.BigDecimal balance = 1 [(scalapb.field).no_box = true];
   repeated string processedTransactions = 2 [(scalapb.field).collection_type="Set"];
 }
 
@@ -40,7 +40,7 @@ message TransactionState {
 }
 
 message ActiveTransaction {
-  stem.commons.BigDecimal amount = 1 [(scalapb.field).no_box = true];
+  io.github.stem.commons.BigDecimal amount = 1 [(scalapb.field).no_box = true];
   string from = 2 [(scalapb.field).type = "accounts.AccountId"];
   string to = 3 [(scalapb.field).type = "accounts.AccountId"];
   TransactionStatus status = 4;

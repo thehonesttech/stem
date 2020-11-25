@@ -1,7 +1,7 @@
 syntax = "proto2";
 
-package stem.readside.serialization;
-option java_package = "stem.readside.serialization.msg";
+package io.github.stem.readside.serialization;
+option java_package = "io.github.stem.readside.serialization.msg";
 option optimize_for = SPEED;
 
 message KeepRunning {

@@ -1,7 +1,7 @@
 syntax = "proto2";
 
-package stem.engine.akka.serialization;
-option java_package = "stem.runtime.akka.serialization.msg";
+package io.github.stem.engine.akka.serialization;
+option java_package = "io.github.stem.runtime.akka.serialization.msg";
 option optimize_for = SPEED;
 
 message KeyedCommand {

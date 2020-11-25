@@ -1,3 +1,6 @@
+import sbtrelease.ReleaseStateTransformations.{checkSnapshotDependencies, commitNextVersion, commitReleaseVersion, inquireVersions, publishArtifacts, pushChanges, runClean, runTest, setNextVersion, setReleaseVersion, tagRelease}
+import sbtrelease.Version.Bump
+
 val grpcVersion = "1.30.2"
 
 lazy val commonProtobufSettings = Seq(
@@ -6,7 +9,7 @@ lazy val commonProtobufSettings = Seq(
   ),
   PB.targets in Compile := Seq(
     scalapb.gen(grpc = true, flatPackage = false) -> (sourceManaged in Compile).value,
-    scalapb.zio_grpc.ZioCodeGenerator             -> (sourceManaged in Compile).value
+    scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value
   )
 )
 
@@ -16,6 +19,55 @@ lazy val commonSettings = Seq(
   zioTest
 )
 
+lazy val noPublishSettings = Seq(publish := (()), publishLocal := (()), publishArtifact := false)
+
+lazy val publishSettings = Seq(
+  releaseCrossBuild := true,
+  releaseVersionBump := Bump.Minor,
+  releaseCommitMessage := s"Set version to ${
+    if (releaseUseGlobalVersion.value) (version in ThisBuild).value
+    else version.value
+  }",
+  releaseIgnoreUntrackedFiles := true,
+  releasePublishArtifactsAction := PgpKeys.publishSigned.value,
+  homepage := Some(url("https://github.com/thehonesttech/stem")),
+  licenses := Seq("MIT" -> url("http://opensource.org/licenses/MIT")),
+  publishMavenStyle := true,
+  publishArtifact in Test := false,
+  resolvers ++= Seq(Resolver.sonatypeRepo("releases"), Resolver.sonatypeRepo("snapshots")),
+  pomIncludeRepository := { _ =>
+    false
+  },
+  publishTo := {
+    val nexus = "https://oss.sonatype.org/"
+    if (isSnapshot.value)
+      Some("snapshots" at nexus + "content/repositories/snapshots")
+    else
+      Some("releases" at nexus + "content/repositories/releases")
+  },
+  autoAPIMappings := true,
+  scmInfo := Some(
+    ScmInfo(url("https://github.com/thehonesttech/stem"), "scm:git:git@github.com:thehonesttech/stem.git")
+  ),
+  pomExtra :=
+    <developers>
+      <developer>
+        <id>thehonesttech</id>
+        <name>Tobia Loschiavo</name>
+        <url>https://github.com/thehonesttech/stem</url>
+      </developer>
+    </developers>
+)
+
+lazy val credentialSettings = Seq(
+  // For Travis CI - see http://www.cakesolutions.net/teamblogs/publishing-artefacts-to-oss-sonatype-nexus-using-sbt-and-travis-ci
+  credentials ++= (for {
+    username <- Option(System.getenv().get("SONATYPE_USERNAME"))
+    password <- Option(System.getenv().get("SONATYPE_PASSWORD"))
+  } yield Credentials("Sonatype Nexus Repository Manager", "oss.sonatype.org", username, password)).toSeq
+)
+
+
 def stemModule(id: String, description: String): Project =
   Project(id, file(s"$id"))
     .settings(moduleName := id, name := description)
@@ -24,13 +76,18 @@ lazy val `core` = stemModule("core", "Core framework")
   .dependsOn(`data`, `readside`, `macros`)
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
+  .settings(publishSettings)
 lazy val `data` = stemModule("data", "Data structures").settings(libraryDependencies ++= allDeps)
+  .settings(publishSettings)
 lazy val `readside` =
   stemModule("readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
+    .settings(publishSettings)
 lazy val `macros` = stemModule("macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
+  .settings(publishSettings)
 lazy val `example` = stemModule("example", "Ledger example")
   .dependsOn(`core`, `macros`, `readside`)
   .settings(libraryDependencies ++= testDeps ++ exampleDeps)
+  .settings(noPublishSettings)
   .settings(zioTest)
   .settings(commonProtobufSettings)
 
@@ -39,7 +96,7 @@ lazy val root = (project in file("."))
   .settings(
     inThisBuild(
       List(
-        organization := "uk.co.thehonesttech",
+        organization := "io.github.thehonesttech",
         scalaVersion := "2.13.3",
         version := "0.1.0-SNAPSHOT"
       )
@@ -79,5 +136,22 @@ val allDeps = Seq(
 ) ++ testDeps
 
 aggregateProjects(`core`, `example`, `data`, `readside`, `macros`)
+
+lazy val sharedReleaseProcess = Seq(
+  releaseProcess := Seq[ReleaseStep](
+    checkSnapshotDependencies,
+    inquireVersions,
+    runClean,
+    runTest,
+    setReleaseVersion,
+    commitReleaseVersion,
+    tagRelease,
+    publishArtifacts,
+    setNextVersion,
+    commitNextVersion,
+    ReleaseStep(action = "sonatypeReleaseAll" :: _),
+    pushChanges
+  )
+)
 
 val zioTest = testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")

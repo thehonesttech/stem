@@ -8,10 +8,10 @@ import ledger.LedgerTest._
 import ledger.communication.grpc._
 import ledger.eventsourcing.events._
 import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage, OpenAccountMessage}
-import stem.data.Versioned
-import stem.runtime.akka.EventSourcedBehaviour
-import stem.test.StemtityProbe
-import stem.test.TestStemRuntime._
+import io.github.stem.data.Versioned
+import io.github.stem.runtime.akka.EventSourcedBehaviour
+import io.github.stem.test.StemtityProbe
+import io.github.stem.test.TestStemRuntime._
 import transactions.TransactionEntity.{transactionProtocol, TransactionCommandHandler}
 import transactions.{TransactionEntity, TransactionId}
 import zio.duration.durationInt
@@ -99,7 +99,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
     )
   }
 
-  // real from stubbed are these modules: readSideProcessing, memoryStores and testStem/stem
+  // real from stubbed are these modules: readSideProcessing, memoryStores and testStem/io.github.stem
   // helper method to retrieve stemtity, probe and grpc
 
   private def env = {

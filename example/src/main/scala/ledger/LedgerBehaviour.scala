@@ -10,12 +10,12 @@ import ledger.communication.grpc._
 import ledger.eventsourcing.events.{AccountEvent, AccountState, TransactionAuthorized, TransactionCreated, TransactionEvent, TransactionState}
 import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage, OpenAccountMessage}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
-import stem.StemApp
-import stem.StemApp.{clientEmptyCombinator, ReadSideParams}
-import stem.communication.kafka._
-import stem.data._
-import stem.readside.ReadSideProcessing
-import stem.runtime.readside.CommittableJournalQuery
+import io.github.stem.StemApp
+import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
+import io.github.stem.communication.kafka._
+import io.github.stem.data._
+import io.github.stem.readside.ReadSideProcessing
+import io.github.stem.runtime.readside.CommittableJournalQuery
 import transactions.TransactionEntity.TransactionCommandHandler
 import transactions.{TransactionEntity, TransactionId}
 import zio.blocking.Blocking
