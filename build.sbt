@@ -68,23 +68,23 @@ lazy val credentialSettings = Seq(
 )
 
 
-def stemModule(id: String, description: String): Project =
-  Project(id, file(s"$id"))
+def stemModule(id: String, path: String, description: String): Project =
+  Project(id, file(path))
     .settings(moduleName := id, name := description)
 
-lazy val `core` = stemModule("stem-core", "Core framework")
+lazy val `core` = stemModule("stem-core", "core", "Core framework")
   .dependsOn(`data`, `readside`, `macros`)
   .settings(libraryDependencies ++= allDeps)
   .settings(commonProtobufSettings)
   .settings(publishSettings)
-lazy val `data` = stemModule("stem-data", "Data structures").settings(libraryDependencies ++= allDeps)
+lazy val `data` = stemModule("stem-data", "data", "Data structures").settings(libraryDependencies ++= allDeps)
   .settings(publishSettings)
 lazy val `readside` =
-  stemModule("stem-readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
+  stemModule("steam-readside", "readside", "Read side views").dependsOn(`data`).settings(libraryDependencies ++= allDeps).settings(commonProtobufSettings)
     .settings(publishSettings)
-lazy val `macros` = stemModule("stem-macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
+lazy val `macros` = stemModule("steam-macros", "macros", "Protocol macros").dependsOn(`data`).settings(libraryDependencies ++= allDeps)
   .settings(publishSettings)
-lazy val `example` = stemModule("example", "Ledger example")
+lazy val `example` = stemModule("example", "example", "Ledger example")
   .dependsOn(`core`, `macros`, `readside`)
   .settings(libraryDependencies ++= testDeps ++ exampleDeps)
   .settings(noPublishSettings)
