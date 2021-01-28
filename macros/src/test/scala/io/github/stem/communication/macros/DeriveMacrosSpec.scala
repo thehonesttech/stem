@@ -1,10 +1,10 @@
 package io.github.stem.communication.macros
 
 import io.github.stem.data.AlgebraCombinators.Combinators
+import io.github.stem.data.StemProtocol
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers._
-import io.github.stem.data.{AlgebraCombinators, StemProtocol}
-import zio.{Has, IO, ZIO}
+import zio.{IO, ZIO}
 
 class DeriveMacrosSpec extends AnyFreeSpec {
 
@@ -17,8 +17,8 @@ class DeriveMacrosSpec extends AnyFreeSpec {
 
   "Codec" - {
     import boopickle.Default._
-    import scodec.bits.BitVector
     import io.github.stem.communication.macros.BoopickleCodec._
+    import scodec.bits.BitVector
 
     val inputCodec = codec[(Int, String)]
     val mainCodec = codec[(String, BitVector)]

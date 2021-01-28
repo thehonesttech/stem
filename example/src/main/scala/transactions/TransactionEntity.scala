@@ -8,13 +8,13 @@ import scalapb.TypeMapper
 import io.github.stem.StemApp
 import io.github.stem.communication.macros.RpcMacro
 import io.github.stem.communication.macros.annotations.MethodId
-import io.github.stem.data.AlgebraCombinators._
 import io.github.stem.data.{EventTag, StemProtocol, Tagging}
 import io.github.stem.runtime.Fold
 import io.github.stem.runtime.Fold.impossible
 import io.github.stem.runtime.akka.StemRuntime.memoryStemtity
 import io.github.stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
 import zio.{IO, Runtime}
+import io.github.stem.data.AlgebraCombinators._
 
 object TransactionEntity {
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
@@ -24,34 +24,25 @@ object TransactionEntity {
     type SIO[Response] = StemApp.SIO[TransactionState, TransactionEvent, String, Response]
 
     @MethodId(1)
-    def create(from: AccountId, to: AccountId, amount: BigDecimal): SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read
+    def create(from: AccountId, to: AccountId, amount: BigDecimal): SIO[Unit] = read[TransactionState, TransactionEvent, String]
         .flatMap {
           case _: InitialTransaction =>
             append(TransactionCreated(from = from, to = to, amount))
           case _ =>
             ignore
         }
-    }
 
     @MethodId(2)
-    def authorise: SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read.flatMap {
+    def authorise: SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
         case _: ActiveTransaction =>
           append(TransactionAuthorized())
         case _ =>
           reject("Auth in progress, cannot auth twice")
       }
 
-    }
 
     @MethodId(3)
-    def fail(reason: String): SIO[Unit] = accessCombinator { ops =>
-      import ops._
-
-      read.flatMap {
+    def fail(reason: String): SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
         case inProgress: ActiveTransaction =>
           if (inProgress.status == TransactionStatus.Failed) {
             ignore
@@ -61,12 +52,9 @@ object TransactionEntity {
         case _ =>
           reject("Transaction not found")
       }
-    }
 
     @MethodId(4)
-    def succeed: SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read.flatMap {
+    def succeed: SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
         case inProgress: ActiveTransaction =>
           if (inProgress.status == TransactionStatus.Succeeded) {
             ignore
@@ -78,19 +66,17 @@ object TransactionEntity {
         case _ =>
           reject("Transaction not found")
       }
-    }
 
     @MethodId(5)
-    def getInfo: SIO[TransactionInfo] = accessCombinator { ops =>
-      import ops._
-      read.flatMap {
+    def getInfo: SIO[TransactionInfo] =
+      read[TransactionState, TransactionEvent, String].flatMap {
         case ActiveTransaction(amount, from, to, status) =>
           IO.succeed(TransactionInfo(from, to, amount, status == Succeeded))
         case _ =>
           reject("Transaction not found")
       }
     }
-  }
+
 
   val errorHandler: Throwable => String = _.getMessage
 

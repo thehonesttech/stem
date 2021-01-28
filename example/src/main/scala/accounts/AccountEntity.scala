@@ -1,18 +1,18 @@
 package accounts
 
-import ledger.LedgerServer
-import ledger.eventsourcing.events._
-import scalapb.TypeMapper
 import io.github.stem.StemApp
 import io.github.stem.communication.macros.RpcMacro
 import io.github.stem.communication.macros.annotations.MethodId
-import io.github.stem.data.AlgebraCombinators.accessCombinator
+import io.github.stem.data.AlgebraCombinators._
 import io.github.stem.data.{EventTag, StemProtocol, Tagging}
 import io.github.stem.runtime.Fold
 import io.github.stem.runtime.Fold.impossible
 import io.github.stem.runtime.akka.StemRuntime.memoryStemtity
 import io.github.stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
-import zio.{IO, Runtime, Task}
+import ledger.LedgerServer
+import ledger.eventsourcing.events._
+import scalapb.TypeMapper
+import zio.{IO, Runtime}
 
 object AccountEntity {
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
@@ -21,21 +21,17 @@ object AccountEntity {
     type SIO[Response] = StemApp.SIO[AccountState, AccountEvent, String, Response]
 
     @MethodId(1)
-    def open: SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read
+    def open: SIO[Unit] = read[AccountState, AccountEvent, String]
         .flatMap {
           case EmptyAccount() =>
             append(AccountOpened())
           case _ =>
             ignore
         }
-    }
 
     @MethodId(2)
-    def credit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read.flatMap {
+    def credit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] =
+      read[AccountState, AccountEvent, String].flatMap {
         case account: ActiveAccount =>
           if (account.processedTransactions(transactionId.value)) {
             ignore
@@ -45,12 +41,9 @@ object AccountEntity {
         case _ =>
           reject("Account does not exist")
       }
-    }
 
     @MethodId(3)
-    def debit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = accessCombinator { ops =>
-      import ops._
-      read.flatMap {
+    def debit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = read[AccountState, AccountEvent, String].flatMap {
         case account: ActiveAccount =>
           if (account.processedTransactions(transactionId.value)) {
             ignore
@@ -64,7 +57,6 @@ object AccountEntity {
           reject("Account does not exist")
       }
     }
-  }
 
   val errorHandler: Throwable => String = _.getMessage
 
