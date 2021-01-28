@@ -1,7 +1,7 @@
 import sbtrelease.ReleaseStateTransformations.{checkSnapshotDependencies, commitNextVersion, commitReleaseVersion, inquireVersions, publishArtifacts, pushChanges, runClean, runTest, setNextVersion, setReleaseVersion, tagRelease}
 import sbtrelease.Version.Bump
 
-val grpcVersion = "1.30.2"
+val grpcVersion = "1.34.0"
 
 lazy val commonProtobufSettings = Seq(
   PB.protoSources.in(Compile) := Seq(
@@ -114,16 +114,16 @@ val testDeps = Seq(
   "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
   "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
   "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.3",
-  "dev.zio" %% "zio-test-sbt" % "1.0.3" % Test,
-  "dev.zio" %% "zio-test-magnolia" % "1.0.3" % Test
+  "dev.zio" %% "zio-test" % "1.0.4",
+  "dev.zio" %% "zio-test-sbt" % "1.0.4" % Test,
+  "dev.zio" %% "zio-test-magnolia" % "1.0.4" % Test
 )
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",
   "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.31",
   "com.typesafe.akka" %% "akka-cluster" % "2.5.31",
-  "dev.zio" %% "zio-streams" % "1.0.3",
+  "dev.zio" %% "zio-streams" % "1.0.4",
   "dev.zio" %% "zio-kafka" % "0.13.0",
   "io.suzaku" %% "boopickle" % "1.3.2",
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0",
