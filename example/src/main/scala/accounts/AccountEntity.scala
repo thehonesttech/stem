@@ -9,13 +9,11 @@ import io.github.stem.runtime.Fold
 import io.github.stem.runtime.Fold.impossible
 import io.github.stem.runtime.akka.StemRuntime.memoryStemtity
 import io.github.stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
-import ledger.LedgerServer
 import ledger.eventsourcing.events._
 import scalapb.TypeMapper
-import zio.{IO, Runtime}
+import zio.IO
 
 object AccountEntity {
-  implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
 
   class AccountCommandHandler {
     type SIO[Response] = StemApp.SIO[AccountState, AccountEvent, String, Response]

@@ -26,8 +26,7 @@ object StemRuntime {
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
   )(
-    implicit runtime: Runtime[ZEnv],
-    protocol: StemProtocol[Algebra, State, Event, Reject]
+    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[Key, Event]], Throwable, Key => Algebra] = {
     ZIO.accessM { layer =>
       val memoryEventJournal = layer.get[EventJournal[Key, Event]]
@@ -50,8 +49,7 @@ object StemRuntime {
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
   )(
-    implicit runtime: Runtime[ZEnv],
-    protocol: StemProtocol[Algebra, State, Event, Reject]
+    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[ActorSystem] with Has[RuntimeSettings], Throwable, Key => Algebra] = ZIO.access { layer =>
     val system = layer.get[ActorSystem]
     val settings = layer.get[RuntimeSettings]

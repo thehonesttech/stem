@@ -16,14 +16,14 @@ object StemActor {
   def props[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-  )(implicit runtime: Runtime[ZEnv], protocol: StemProtocol[Algebra, State, Event, Reject]): Props =
+  )(implicit protocol: StemProtocol[Algebra, State, Event, Reject]): Props =
     Props(new StemActor[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, algebraCombinatorConfig))
 }
 
 private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, Reject: Tag](
   eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-)(implicit runtime: Runtime[ZEnv], protocol: StemProtocol[Algebra, State, Event, Reject])
+)(implicit protocol: StemProtocol[Algebra, State, Event, Reject])
     extends Actor
     with Stash
     with ActorLogging {
@@ -58,7 +58,7 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       val invocation: Invocation[State, Event, Reject] =
         protocol.server(eventSourcedBehaviour.algebra, eventSourcedBehaviour.errorHandler)
 
-      sender() ! runtime
+      sender() ! Runtime.default
         .unsafeRunToFuture(
           invocation
             .call(bytes)
