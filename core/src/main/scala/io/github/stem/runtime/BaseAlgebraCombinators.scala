@@ -50,7 +50,7 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   userBehaviour: Fold[State, Event],
   errorHandler: Throwable => Reject,
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-) extends AlgebraCombinators[State, Event, Reject] {
+) extends AlgebraCombinators.Service[State, Event, Reject] {
   import algebraCombinatorConfig._
   type Offset = Long
 

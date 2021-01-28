@@ -1,5 +1,6 @@
 package io.github.stem.communication.macros
 
+import io.github.stem.data.AlgebraCombinators.Combinators
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers._
 import io.github.stem.data.{AlgebraCombinators, StemProtocol}
@@ -41,7 +42,7 @@ class DeriveMacrosSpec extends AnyFreeSpec {
 }
 
 class AlgebraImpl {
-  type SIO[Return] = ZIO[Has[AlgebraCombinators[String, String, String]], String, Return]
+  type SIO[Return] = ZIO[Combinators[String, String, String], String, Return]
 
   def operation1(param: String): SIO[String] = IO.succeed(param)
 }

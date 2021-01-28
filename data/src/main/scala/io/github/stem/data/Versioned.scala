@@ -1,5 +1,6 @@
 package io.github.stem.data
 
+import io.github.stem.data.AlgebraCombinators.Combinators
 import scodec.bits.BitVector
 import zio.{Has, Task, ZIO}
 
@@ -10,5 +11,5 @@ final case class Versioned[A](version: Long, value: A) {
 }
 
 trait Invocation[State, Event, Reject] {
-  def call(message: BitVector): ZIO[Has[AlgebraCombinators[State, Event, Reject]], Throwable, BitVector]
+  def call(message: BitVector): ZIO[Combinators[State, Event, Reject], Throwable, BitVector]
 }

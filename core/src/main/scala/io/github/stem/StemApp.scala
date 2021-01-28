@@ -19,7 +19,7 @@ object StemApp {
 
   type SIO[State, Event, Reject, Result] = ZIO[Combinators[State, Event, Reject], Reject, Result]
 
-  def liveAlgebra[Reject]: AlgebraCombinators[Nothing, Any, Reject] = new AlgebraCombinators[Nothing, Any, Reject] {
+  def liveAlgebra[Reject]: AlgebraCombinators.Service[Nothing, Any, Reject] = new AlgebraCombinators.Service[Nothing, Any, Reject] {
     override def read: IO[Reject, Nothing] = throw new RuntimeException("This is a stub")
 
     override def append(es: Any, other: Any*): IO[Reject, Unit] = throw new RuntimeException("This is a stub")
@@ -27,7 +27,7 @@ object StemApp {
     override def reject[A](r: Reject): IO[Reject, A] = throw new RuntimeException("This is a stub")
   }
 
-  def clientEmptyCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[AlgebraCombinators[State, Event, Reject]]] =
+  def clientEmptyCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Combinators[State, Event, Reject]] =
     ZLayer.succeed(liveAlgebra[Reject])
 
   def actorSystemLayer(name: String, confFileName: String = "stem.conf") =

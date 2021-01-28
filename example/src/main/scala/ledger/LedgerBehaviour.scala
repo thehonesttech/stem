@@ -1,6 +1,6 @@
 package ledger
 
-import accounts.AccountEntity.{errorHandler, tagging, AccountCommandHandler}
+import accounts.AccountEntity.{AccountCommandHandler, errorHandler, tagging}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
 import io.grpc.Status
 import ledger.LedgerGrpcService.{Accounts, Transactions}
@@ -11,8 +11,9 @@ import ledger.eventsourcing.events.{AccountEvent, AccountState, TransactionAutho
 import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage, OpenAccountMessage}
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import io.github.stem.StemApp
-import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
+import io.github.stem.StemApp.{ReadSideParams, clientEmptyCombinator}
 import io.github.stem.communication.kafka._
+import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data._
 import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
@@ -21,7 +22,7 @@ import transactions.{TransactionEntity, TransactionId}
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
-import zio.duration.{durationInt, Duration}
+import zio.duration.{Duration, durationInt}
 import zio.kafka.consumer.ConsumerSettings
 import zio.{Has, IO, Managed, Runtime, Task, ZEnv, ZIO, ZLayer}
 
@@ -33,7 +34,7 @@ case class Denied(reason: String) extends LockResponse
 
 object LedgerServer extends ServerMain {
 
-  type LedgerCombinator = AlgebraCombinators[Int, AccountEvent, String]
+  type LedgerCombinator = AlgebraCombinators.Service[Int, AccountEvent, String]
   val readSidePollingInterval: Duration = 100.millis
 
   private val kafkaConfiguration = KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
@@ -61,9 +62,9 @@ object LedgerServer extends ServerMain {
   private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
     (ledgerService and kafkaMessageHandling and readSideProcessor).mapError(_ => new RuntimeException("Bad layer"))
 
-  val emptyCombinators: ZLayer[Any, Nothing, Has[AlgebraCombinators[AccountState, AccountEvent, String]] with Has[
-    AlgebraCombinators[TransactionState, TransactionEvent, String]
-  ]] = clientEmptyCombinator[AccountState, AccountEvent, String] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
+  val emptyCombinators: ZLayer[Any, Nothing, Combinators[AccountState, AccountEvent, String] with
+    Combinators[TransactionState, TransactionEvent, String]
+  ] = clientEmptyCombinator[AccountState, AccountEvent, String] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }

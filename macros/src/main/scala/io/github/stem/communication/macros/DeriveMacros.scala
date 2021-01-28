@@ -121,7 +121,7 @@ class DeriveMacros(val c: blackbox.Context) {
         }
 
         val newBody =
-          q""" ZIO.accessM { _: Has[AlgebraCombinators[$state, $event, $reject]] =>
+          q""" ZIO.accessM { _: Combinators[$state, $event, $reject] =>
                        val hint = $hintToUse
                        
                        val codecResult = codec[Either[$reject, $out]]
@@ -199,6 +199,7 @@ class DeriveMacros(val c: blackbox.Context) {
             import io.github.stem.data.Invocation
             import zio._
             import io.github.stem.data.AlgebraCombinators
+            import io.github.stem.data.AlgebraCombinators.Combinators
 
              private val mainCodec = codec[(String, BitVector)]
              val client: (BitVector => Task[BitVector], Throwable => $reject) => $algebra =
@@ -208,9 +209,9 @@ class DeriveMacros(val c: blackbox.Context) {
              val server: ($algebra, Throwable => $reject) => Invocation[$state, $event, $reject] =
                (algebra: $algebra, errorHandler: Throwable => $reject) =>
                  new Invocation[$state, $event, $reject] {
-                   private def buildVectorFromHint(hint: String, arguments: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], Throwable, BitVector] = { $serverHintBitVectorFunction }
+                   private def buildVectorFromHint(hint: String, arguments: BitVector): ZIO[Combinators[$state, $event, $reject], Throwable, BitVector] = { $serverHintBitVectorFunction }
 
-                   override def call(message: BitVector): ZIO[Has[AlgebraCombinators[$state, $event, $reject]], Throwable, BitVector] = {
+                   override def call(message: BitVector): ZIO[Combinators[$state, $event, $reject], Throwable, BitVector] = {
                      // for each method extract the name, it could be a sequence number for the method
                        // according to the hint, extract the arguments
                        for {
