@@ -1,30 +1,31 @@
 package ledger
 
-import accounts.AccountEntity.{AccountCommandHandler, errorHandler, tagging}
+import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
-import io.grpc.Status
-import ledger.LedgerGrpcService.{Accounts, Transactions}
-import ledger.LedgerServer.emptyCombinators
-import ledger.communication.grpc.ZioService.ZLedger
-import ledger.communication.grpc._
-import ledger.eventsourcing.events.{AccountEvent, AccountState, TransactionAuthorized, TransactionCreated, TransactionEvent, TransactionState}
-import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage, OpenAccountMessage}
-import scalapb.zio_grpc.{ServerMain, ServiceList}
 import io.github.stem.StemApp
-import io.github.stem.StemApp.{ReadSideParams, clientEmptyCombinator}
+import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
 import io.github.stem.communication.kafka._
 import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data._
 import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
+import io.grpc.Status
+import ledger.LedgerGrpcService.{Accounts, Transactions}
+import ledger.LedgerServer.emptyCombinators
+import ledger.communication.grpc.ZioService.ZLedger
+import ledger.communication.grpc._
+import ledger.eventsourcing.events._
+import ledger.messages.messages._
+import scalapb.zio_grpc.{ServerMain, ServiceList}
 import transactions.TransactionEntity.TransactionCommandHandler
 import transactions.{TransactionEntity, TransactionId}
 import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
-import zio.duration.{Duration, durationInt}
+import zio.duration.{durationInt, Duration}
 import zio.kafka.consumer.ConsumerSettings
-import zio.{Has, IO, Managed, Runtime, Task, ZEnv, ZIO, ZLayer}
+import zio.magic._
+import zio.{Has, IO, Managed, Runtime, ZEnv, ZIO, ZLayer}
 
 sealed trait LockResponse
 
@@ -37,34 +38,42 @@ object LedgerServer extends ServerMain {
   type LedgerCombinator = AlgebraCombinators.Service[Int, AccountEvent, String]
   val readSidePollingInterval: Duration = 100.millis
 
-  private val kafkaConfiguration = KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
-    "testtopic",
-    ConsumerSettings(List("0.0.0.0"))
-  )
+  private val messageHandling = LedgerInboundMessageHandling.messageHandling
+    .map(
+      logic =>
+        KafkaMessageConsumer(
+          KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
+            "testtopic",
+            ConsumerSettings(List("0.0.0.0"))
+          ),
+          errorHandler,
+          logic
+        ): MessageConsumer[LedgerId, LedgerInstructionsMessage, String]
+    )
+    .toLayer
 
-  private val actorSystem = StemApp.actorSettings("System")
-  private val runtimeLayers = actorSystem >+> (StemApp.liveRuntime[TransactionId, TransactionEvent] ++ StemApp.liveRuntime[AccountId, AccountEvent])
-  private val entities = runtimeLayers to (AccountEntity.live ++ TransactionEntity.live)
+  private def buildSystem[R <: zio.Has[_]]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
+    ZLayer
+      .fromSomeMagic[R, Has[ZLedger[ZEnv, Any]]](
+        StemApp.actorSettings("System"),
+        StemApp.liveRuntime[AccountId, AccountEvent],
+        StemApp.liveRuntime[TransactionId, TransactionEvent],
+        AccountEntity.live,
+        TransactionEntity.live,
+        ProcessReadSide.live,
+        LedgerGrpcService.live,
+        messageHandling,
+        LedgerInboundMessageHandling.live,
+        TransactionReadSideProcessor.live
+      )
+      .mapError(_ => new RuntimeException("Bad layer"))
 
-  private val ledgerLogicLayer = entities to ProcessReadSide.live
-
-  private val readSideProcessor = ledgerLogicLayer and runtimeLayers to TransactionReadSideProcessor.live
-
-  private val kafkaMessageConsumer = entities to
-    LedgerInboundMessageHandling.messageHandling
-      .map(logic => KafkaMessageConsumer(kafkaConfiguration, errorHandler, logic): MessageConsumer[LedgerId, LedgerInstructionsMessage, String])
-      .toLayer
-
-  private val kafkaMessageHandling = ZEnv.live and kafkaMessageConsumer to LedgerInboundMessageHandling.live
-
-  private val ledgerService = (entities and ledgerLogicLayer) to LedgerGrpcService.live
-
-  private def buildSystem[R]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    (ledgerService and kafkaMessageHandling and readSideProcessor).mapError(_ => new RuntimeException("Bad layer"))
-
-  val emptyCombinators: ZLayer[Any, Nothing, Combinators[AccountState, AccountEvent, String] with
-    Combinators[TransactionState, TransactionEvent, String]
-  ] = clientEmptyCombinator[AccountState, AccountEvent, String] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
+  val emptyCombinators
+    : ZLayer[Any, Nothing, Combinators[AccountState, AccountEvent, String] with Combinators[TransactionState, TransactionEvent, String]] = clientEmptyCombinator[
+      AccountState,
+      AccountEvent,
+      String
+    ] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }

@@ -114,16 +114,16 @@ val testDeps = Seq(
   "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
   "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
   "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.4",
-  "dev.zio" %% "zio-test-sbt" % "1.0.4" % Test,
-  "dev.zio" %% "zio-test-magnolia" % "1.0.4" % Test
+  "dev.zio" %% "zio-test" % "1.0.5",
+  "dev.zio" %% "zio-test-sbt" % "1.0.5" % Test,
+  "dev.zio" %% "zio-test-magnolia" % "1.0.5" % Test
 )
 
 val allDeps = Seq(
   "org.apache.kafka" % "kafka-clients" % "2.1.0",
   "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.31",
   "com.typesafe.akka" %% "akka-cluster" % "2.5.31",
-  "dev.zio" %% "zio-streams" % "1.0.4",
+  "dev.zio" %% "zio-streams" % "1.0.5",
   "dev.zio" %% "zio-kafka" % "0.13.0",
   "io.suzaku" %% "boopickle" % "1.3.2",
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0",
@@ -132,6 +132,7 @@ val allDeps = Seq(
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0" % "protobuf",
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0",
+  "io.github.kitlangton" %% "zio-magic" % "0.1.12",
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps
 
