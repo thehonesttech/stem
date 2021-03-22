@@ -9,7 +9,7 @@ import ReadSideProcessing._
 import io.github.stem.readside.ReadSideProcessing.RunningProcess
 
 object ReadSideWorkerActor {
-  def props(processWithId: Int => Process, processName: String)(implicit runtime: Runtime[ZEnv]): Props =
+  def props(processWithId: Int => Process, processName: String)(implicit runtime: Runtime[Any]): Props =
     Props(new ReadSideWorkerActor(processWithId, processName))
 
   final case class KeepRunning(workerId: Int) extends Message
@@ -19,7 +19,7 @@ object ReadSideWorkerActor {
 final class ReadSideWorkerActor(
   processFor: Int => Process,
   processName: String
-)(implicit val runtime: Runtime[ZEnv])
+)(implicit val runtime: Runtime[Any])
     extends Actor
     with ActorLogging {
 

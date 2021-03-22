@@ -10,7 +10,8 @@ import zio.stream.ZStream
 class MemoryEventJournal[Key, Event](
   pollingInterval: Duration,
   internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],
-  internalQueue: Queue[(Key, Event)]
+  internalQueue: Queue[(Key, Event)],
+  clock: Clock.Service
 ) extends EventJournal[Key, Event]
     with JournalQuery[Long, Key, Event] {
 
@@ -59,17 +60,16 @@ class MemoryEventJournal[Key, Event](
     stream.Stream.fromIterableM(a)
   }
 
-  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Clock, Throwable, JournalEntry[Long, Key, Event]] = {
-    ZStream.fromEffect(Ref.make[Option[Long]](None)).flatMap { lastOffsetProcessed =>
-      ZStream.fromSchedule(Schedule.fixed(pollingInterval)) *> ZStream
+  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Any, Throwable, JournalEntry[Long, Key, Event]] = {
+    (for {
+      lastOffsetProcessed <- ZStream.fromEffect(Ref.make[Option[Long]](None))
+      _                   <- ZStream.fromSchedule(Schedule.fixed(pollingInterval))
+      lastOffset <- ZStream
         .fromEffect(lastOffsetProcessed.get)
-        .flatMap(
-          lastOffset =>
-            currentEventsByTag(tag, lastOffset.orElse(offset)).mapM { event =>
-              lastOffsetProcessed.set(Some(event.offset)).as(event)
-            }
-        )
-    }
+      journalEntry <- currentEventsByTag(tag, lastOffset.orElse(offset)).mapM { event =>
+        lastOffsetProcessed.set(Some(event.offset)).as(event)
+      }
+    } yield journalEntry).provideLayer(ZLayer.succeed(clock))
   }
 
   override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
@@ -94,10 +94,11 @@ class MemoryEventJournal[Key, Event](
 }
 
 object MemoryEventJournal {
-  def make[Key, Event](pollingInterval: Duration): ZIO[Any, Nothing, MemoryEventJournal[Key, Event]] = {
+  def make[Key, Event](pollingInterval: Duration): ZIO[Clock, Nothing, MemoryEventJournal[Key, Event]] = {
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())
       queue    <- Queue.unbounded[(Key, Event)]
-    } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue)
+      clock    <- ZIO.service[Clock.Service]
+    } yield new MemoryEventJournal[Key, Event](pollingInterval, internal, queue, clock)
   }
 }

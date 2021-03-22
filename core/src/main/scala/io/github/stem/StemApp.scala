@@ -35,14 +35,15 @@ object StemApp {
       Managed.make(Task(ActorSystem(name, ConfigFactory.load(confFileName))))(sys => Task.fromFuture(_ => sys.terminate()).either)
     )
 
-  def readSideStream[Id: Tag, Event: Tag, Offset: Tag, Reject](readSideParams: ReadSideParams[Id, Event, Reject], errorHandler: Throwable => Reject)(
-    implicit runtime: Runtime[ZEnv]
+  def readSideStream[Id: Tag, Event: Tag, Offset: Tag, Reject](
+    readSideParams: ReadSideParams[Id, Event, Reject],
+    errorHandler: Throwable => Reject
   ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] = {
     // simplify and then improve it
     ZStream.accessStream { layers =>
       val readSideProcessing = layers.get[ReadSideProcessing]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
-      val sources: Seq[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
+      val sources: Seq[ZStream[Any, Reject, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
         journal.eventsByTag(tag, readSideParams.consumerId).mapError(errorHandler)
       }
       // convert into process
@@ -83,10 +84,10 @@ object StemApp {
   )
 
   private def buildStreamAndProcesses[Offset: Tag, Event: Tag, Id: Tag, Reject](
-    sources: Seq[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]]
+    sources: Seq[ZStream[Any, Reject, Committable[JournalEntry[Offset, Id, Event]]]]
   ) = {
     for {
-      queue <- Queue.bounded[ZStream[Clock, Reject, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
+      queue <- Queue.bounded[ZStream[Any, Reject, Committable[JournalEntry[Offset, Id, Event]]]](sources.size)
       processes = sources.map { s =>
         Process {
           for {
@@ -98,7 +99,7 @@ object StemApp {
     } yield (ZStream.fromQueue(queue), processes)
   }
 
-  def actorSettings(actorSystemName: String) = {
+  def actorSettings(actorSystemName: String): ZLayer[Any, Throwable, Has[ActorSystem] with Has[ReadSideSettings] with Has[RuntimeSettings]] = {
     val actorSystem = StemApp.actorSystemLayer(actorSystemName)
     val readSideSettings = actorSystem to ZLayer.fromService(ReadSideSettings.default)
     val runtimeSettings = actorSystem to ZLayer.fromService(RuntimeSettings.default)
@@ -110,18 +111,14 @@ object StemApp {
   ) = {
     val memoryEventJournalStore = memoryJournalStoreLayer[Key, Event](readSidePollingInterval)
     val committableJournalQueryStore = memoryEventJournalStore >>> memoryCommittableJournalStore[Key, Event]
-    val eventJournalStore: ZLayer[Any, Nothing, Has[EventJournal[Key, Event]]] = memoryEventJournalStore.map { layer =>
+    val eventJournalStore: ZLayer[Clock, Nothing, Has[EventJournal[Key, Event]]] = memoryEventJournalStore.map { layer =>
       Has(layer.get.asInstanceOf[EventJournal[Key, Event]])
     }
-    committableJournalQueryStore ++ eventJournalStore ++ memoryEventJournalStore
+    committableJournalQueryStore and (Clock.any to eventJournalStore) and memoryEventJournalStore
   }
   def liveRuntime[Key: Tag, Event: Tag] = {
-    (ZEnv.live ++ stemStores[Key, Event]()) ++ ReadSideProcessing.live
+    stemStores[Key, Event]() ++ ReadSideProcessing.actorBased
   }
-
-  /*def liveRuntime[Key: Tag, Event: Tag](actorSystemName: String) = {
-    (ZEnv.live ++ stemStores[Key, Event]() ++ StemApp.actorSettings(actorSystemName)) >+> ReadSideProcessing.live
-  } */
 
   object Ops {
 

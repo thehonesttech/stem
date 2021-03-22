@@ -17,7 +17,7 @@ import scala.concurrent.duration.{FiniteDuration, _}
 
 trait ReadSideProcessing {
 
-  def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch]
+  def start(name: String, processes: List[Process]): Task[KillSwitch]
 }
 
 trait ReadSideProcessor[Reject] {
@@ -33,45 +33,46 @@ final class ActorReadSideProcessing private (system: ActorSystem, settings: Read
     * @param processes - list of processes to distribute
     *
     */
-  def start(name: String, processes: List[Process])(
-    implicit runtime: Runtime[ZEnv]
-  ): Task[KillSwitch] =
-    Task {
-      val opts = BackoffOpts
-        .onFailure(
-          ReadSideWorkerActor.props(processes, name),
-          "worker",
-          settings.minBackoff,
-          settings.maxBackoff,
-          settings.randomFactor
+  def start(name: String, processes: List[Process]): Task[KillSwitch] = {
+    ZIO.runtime[Any].flatMap { runtime =>
+      Task {
+        val opts = BackoffOpts
+          .onFailure(
+            ReadSideWorkerActor.props(processes, name)(runtime),
+            "worker",
+            settings.minBackoff,
+            settings.maxBackoff,
+            settings.randomFactor
+          )
+
+        val props = BackoffSupervisor.props(opts)
+
+        val region = ClusterSharding(system).start(
+          typeName = name,
+          entityProps = props,
+          settings = settings.clusterShardingSettings,
+          extractEntityId = {
+            case c @ KeepRunning(workerId) => (workerId.toString, c)
+          },
+          extractShardId = {
+            case KeepRunning(workerId) => (workerId % settings.numberOfShards).toString
+            case other                 => throw new IllegalArgumentException(s"Unexpected message [$other]")
+          }
         )
 
-      val props = BackoffSupervisor.props(opts)
-
-      val region = ClusterSharding(system).start(
-        typeName = name,
-        entityProps = props,
-        settings = settings.clusterShardingSettings,
-        extractEntityId = {
-          case c @ KeepRunning(workerId) => (workerId.toString, c)
-        },
-        extractShardId = {
-          case KeepRunning(workerId) => (workerId % settings.numberOfShards).toString
-          case other                 => throw new IllegalArgumentException(s"Unexpected message [$other]")
+        val regionSupervisor = system.actorOf(
+          ReadSideSupervisor
+            .props(processes.size, region, settings.heartbeatInterval),
+          "DistributedProcessingSupervisor-" + URLEncoder
+            .encode(name, StandardCharsets.UTF_8.name())
+        )
+        implicit val timeout = Timeout(settings.shutdownTimeout)
+        KillSwitch {
+          Task.fromFuture(ec => regionSupervisor ? ReadSideSupervisor.GracefulShutdown).unit
         }
-      )
-
-      val regionSupervisor = system.actorOf(
-        ReadSideSupervisor
-          .props(processes.size, region, settings.heartbeatInterval),
-        "DistributedProcessingSupervisor-" + URLEncoder
-          .encode(name, StandardCharsets.UTF_8.name())
-      )
-      implicit val timeout = Timeout(settings.shutdownTimeout)
-      KillSwitch {
-        Task.fromFuture(ec => regionSupervisor ? ReadSideSupervisor.GracefulShutdown).unit
       }
     }
+  }
 }
 
 object ReadSideProcessing {
@@ -82,13 +83,14 @@ object ReadSideProcessing {
 
   final case class Process(run: Task[RunningProcess]) extends AnyVal
 
-  val live = ZLayer.fromServices { (actorSystem: ActorSystem, readSideSettings: ReadSideSettings) =>
-    ActorReadSideProcessing(actorSystem, readSideSettings)
-  }
+  val actorBased: ZLayer[Has[ActorSystem] with Has[ReadSideSettings], Nothing, Has[ReadSideProcessing]] =
+    ZLayer.fromServices[ActorSystem, ReadSideSettings, ReadSideProcessing] { (actorSystem: ActorSystem, readSideSettings: ReadSideSettings) =>
+      ActorReadSideProcessing(actorSystem, readSideSettings)
+    }
 
   val memory: ULayer[Has[ReadSideProcessing]] = ZLayer.succeed {
     new ReadSideProcessing {
-      def start(name: String, processes: List[Process])(implicit runtime: Runtime[ZEnv]): Task[KillSwitch] = {
+      def start(name: String, processes: List[Process]): Task[KillSwitch] = {
         for {
           tasksToShutdown <- ZIO.foreach(processes)(process => process.run)
         } yield KillSwitch(ZIO.foreach(tasksToShutdown)(_.shutdown).as())

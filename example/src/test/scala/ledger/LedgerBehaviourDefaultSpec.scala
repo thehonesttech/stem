@@ -2,23 +2,27 @@ package ledger
 
 import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
+import io.github.stem.data.Versioned
+import io.github.stem.readside.ReadSideProcessing
+import io.github.stem.runtime.akka.EventSourcedBehaviour
+import io.github.stem.test.StemtityProbe
+import io.github.stem.test.TestStemRuntime.TestReadSideProcessor.TestReadSideProcessor
+import io.github.stem.test.TestStemRuntime._
 import ledger.LedgerGrpcService.Accounts
-import ledger.LedgerInboundMessageHandling.messageHandling
 import ledger.LedgerTest._
+import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
 import ledger.eventsourcing.events._
 import ledger.messages.messages.{AuthorizePaymentMessage, LedgerId, LedgerInstructionsMessage, OpenAccountMessage}
-import io.github.stem.data.Versioned
-import io.github.stem.runtime.akka.EventSourcedBehaviour
-import io.github.stem.test.StemtityProbe
-import io.github.stem.test.TestStemRuntime._
 import transactions.TransactionEntity.{transactionProtocol, TransactionCommandHandler}
 import transactions.{TransactionEntity, TransactionId}
 import zio.duration.durationInt
+import zio.magic._
 import zio.test.Assertion.{equalTo, hasSameElements}
 import zio.test.Eql._
 import zio.test._
-import zio.{ZEnv, ZIO}
+import zio.test.environment.TestEnvironment
+import zio.{Has, ZIO, ZLayer}
 
 object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
@@ -44,7 +48,13 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           assert(initialState)(equalTo(ActiveAccount(0, Set()))) &&
           assert(updatedState)(equalTo(ActiveAccount(10, Set("accountTransactionId")))) &&
           assert(stateFromSnapshot)(equalTo(Option(Versioned(2, ActiveAccount(10, Set("accountTransactionId")): AccountState))))
-        }).provideLayer(env)
+        }).provideSomeMagicLayer[TestEnvironment](
+          testStemtityAndStores[AccountId, AccountCommandHandler, AccountState, AccountEvent, String](
+            AccountEntity.tagging,
+            EventSourcedBehaviour(new AccountCommandHandler(), AccountEntity.eventHandlerLogic, AccountEntity.errorHandler),
+            snapshotInterval = 2
+          )
+        )
       }),
       suite("End to end test with memory implementations")(
         testM("End to end test using grpc service") {
@@ -70,7 +80,9 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             assert(stateInitialFrom)(equalTo(ActiveAccount(20, Set("accountTransactionId")))) &&
             assert(result)(equalTo(AuthorizeReply("Created"))) &&
             assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId"))))
-          }).provideLayer(env)
+          }).provideSomeMagicLayer[TestEnvironment](
+            magic
+          )
         },
         testM("End to end test using Kafka") {
           //call grpc service, check events and state, advance time, read side view, send with kafka
@@ -93,7 +105,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             assert(stateInitialTo)(equalTo(ActiveAccount(0, Set()))) &&
             assert(stateInitialFrom)(equalTo(ActiveAccount(20, Set("accountTransactionId")))) &&
             assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId"))))
-          }).provideLayer(env)
+          }).provideSomeMagicLayer[TestEnvironment](magic)
         }
       )
     )
@@ -101,32 +113,49 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   // real from stubbed are these modules: readSideProcessing, memoryStores and testStem/io.github.stem
   // helper method to retrieve stemtity, probe and grpc
+  import zio.magic._
+  type TestAccounts = TestStemtity[AccountId, AccountCommandHandler, AccountState, AccountEvent, String]
+  type TestTransactions = TestStemtity[TransactionId, TransactionCommandHandler, TransactionState, TransactionEvent, String]
+  type TestKafkaConsumer = TestConsumer[LedgerId, LedgerInstructionsMessage, String]
 
-  private def env = {
-    val transactionsAndAccounts = stemtityAndReadSideLayer[TransactionId, TransactionCommandHandler, TransactionState, TransactionEvent, String](
-        TransactionEntity.tagging,
-        EventSourcedBehaviour(new TransactionCommandHandler(), TransactionEntity.eventHandlerLogic, TransactionEntity.errorHandler),
-        snapshotInterval = 2
-      ) and stemtityAndReadSideLayer[AccountId, AccountCommandHandler, AccountState, AccountEvent, String](
-        AccountEntity.tagging,
-        EventSourcedBehaviour(new AccountCommandHandler(), AccountEntity.eventHandlerLogic, AccountEntity.errorHandler),
-        snapshotInterval = 2
+  private val accountLayers = testStemtityAndStores[AccountId, AccountCommandHandler, AccountState, AccountEvent, String](
+    AccountEntity.tagging,
+    EventSourcedBehaviour(new AccountCommandHandler(), AccountEntity.eventHandlerLogic, AccountEntity.errorHandler),
+    snapshotInterval = 2
+  )
+
+  private val transactionLayers = testStemtityAndStores[TransactionId, TransactionCommandHandler, TransactionState, TransactionEvent, String](
+    TransactionEntity.tagging,
+    EventSourcedBehaviour(new TransactionCommandHandler(), TransactionEntity.eventHandlerLogic, TransactionEntity.errorHandler),
+    snapshotInterval = 2
+  )
+
+  private val kafka = TestKafkaMessageConsumer
+    .memory[LedgerId, LedgerInstructionsMessage, String]
+
+  private val magic
+    : ZLayer[TestEnvironment, Throwable, TestTransactions with TestAccounts with Has[ZLedger[Any, Any]] with Has[TestReadSideProcessor[String]] with TestKafkaConsumer] =
+    ZLayer
+      .fromSomeMagic[TestEnvironment, TestTransactions with TestAccounts with Has[
+        ZLedger[Any, Any]
+      ] with Has[TestReadSideProcessor[String]] with TestConsumer[LedgerId, LedgerInstructionsMessage, String]](
+        accountLayers,
+        transactionLayers,
+        ProcessReadSide.live,
+        LedgerGrpcService.live,
+        TransactionReadSideProcessor.readsideParams.toLayer,
+        TestReadSideProcessor
+          .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler),
+        LedgerInboundMessageHandling.liveHandler,
+        ReadSideProcessing.memory,
+        kafka
       )
-    val processReadSide = transactionsAndAccounts to ProcessReadSide.live
-    val grpc = transactionsAndAccounts and processReadSide to LedgerGrpcService.live
-    val readSide = transactionsAndAccounts and (processReadSide to TransactionReadSideProcessor.readsideParams.toLayer) to TestReadSideProcessor
-        .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler)
-    val consumer = (transactionsAndAccounts to messageHandling.toLayer) to TestKafkaMessageConsumer
-        .memory[LedgerId, LedgerInstructionsMessage, String]
-
-    transactionsAndAccounts ++ processReadSide ++ grpc ++ readSide ++ consumer
-  }
 }
 
 object LedgerTest {
   val accountsAndProbes =
     ZIO.services[Accounts, StemtityProbe.Service[AccountId, AccountState, AccountEvent]]
-  val ledgerGrpcService = ZIO.service[ZioService.ZLedger[ZEnv, Any]]
-  val kafkaClient = ZIO.service[TestKafka[LedgerId, LedgerInstructionsMessage, String]]
+  val ledgerGrpcService = ZIO.service[ZioService.ZLedger[Any, Any]]
+  val kafkaClient = ZIO.service[TestKafkaMessageConsumer[LedgerId, LedgerInstructionsMessage, String]]
   val readSideClient = ZIO.service[TestReadSideProcessor.TestReadSideProcessor[String]]
 }

@@ -3,6 +3,17 @@ import sbtrelease.Version.Bump
 
 val grpcVersion = "1.34.0"
 
+//inThisBuild(
+//   List(
+//     scalaVersion := "2.13.3",
+//   semanticdbEnabled := true,
+//   semanticdbVersion := scalafixSemanticdb.revision
+//   )
+// )
+
+
+//ThisBuild / scalafixDependencies += "com.timushev" %% "zio-magic-comments" % "0.1.0"
+
 lazy val commonProtobufSettings = Seq(
   PB.protoSources.in(Compile) := Seq(
     baseDirectory.value / "src/schemas/protobuf"
@@ -12,6 +23,7 @@ lazy val commonProtobufSettings = Seq(
     scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value
   )
 )
+
 
 lazy val commonSettings = Seq(
   scalacOptions += "-Xsource:2.13",

@@ -52,21 +52,8 @@ object LedgerServer extends ServerMain {
     )
     .toLayer
 
-  private def buildSystem[R <: zio.Has[_]]: ZLayer[R, Throwable, Has[ZLedger[ZEnv, Any]]] =
-    ZLayer
-      .fromSomeMagic[R, Has[ZLedger[ZEnv, Any]]](
-        StemApp.actorSettings("System"),
-        StemApp.liveRuntime[AccountId, AccountEvent],
-        StemApp.liveRuntime[TransactionId, TransactionEvent],
-        AccountEntity.live,
-        TransactionEntity.live,
-        ProcessReadSide.live,
-        LedgerGrpcService.live,
-        messageHandling,
-        LedgerInboundMessageHandling.live,
-        TransactionReadSideProcessor.live
-      )
-      .mapError(_ => new RuntimeException("Bad layer"))
+  private val accountStores = StemApp.liveRuntime[AccountId, AccountEvent]
+  private val transactionStores = StemApp.liveRuntime[TransactionId, TransactionEvent]
 
   val emptyCombinators
     : ZLayer[Any, Nothing, Combinators[AccountState, AccountEvent, String] with Combinators[TransactionState, TransactionEvent, String]] = clientEmptyCombinator[
@@ -74,6 +61,23 @@ object LedgerServer extends ServerMain {
       AccountEvent,
       String
     ] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
+
+  private val buildSystem: ZLayer[ZEnv, Throwable, Has[ZLedger[Any, Any]]] =
+    ZLayer
+      .fromSomeMagic[ZEnv, Has[ZLedger[Any, Any]]](
+        StemApp.actorSettings("System"),
+        accountStores,
+        transactionStores,
+        AccountEntity.live,
+        TransactionEntity.live,
+        ProcessReadSide.live,
+        emptyCombinators,
+        LedgerGrpcService.live,
+        messageHandling,
+        LedgerInboundMessageHandling.live,
+        TransactionReadSideProcessor.live
+      )
+      .mapError(_ => new RuntimeException("Bad layer"))
 
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
@@ -165,6 +169,8 @@ object LedgerInboundMessageHandling {
       }
     }
 
+  val liveHandler = messageHandling.toLayer
+
   val live: ZLayer[Console with Clock with Blocking with Has[LedgerMessageConsumer], Nothing, Has[SubscriptionKillSwitch]] =
     ZLayer.fromManaged(
       Managed.make(
@@ -179,27 +185,29 @@ object LedgerInboundMessageHandling {
 
 object LedgerGrpcService {
   type Accounts = AccountId => AccountCommandHandler
+  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
+  type TransactionCombinator = Combinators[TransactionState, TransactionEvent, String]
   type Transactions = TransactionId => TransactionCommandHandler
+  type Requirements = AccountCombinator with TransactionCombinator with Has[Accounts] with Has[Transactions]
 
-  private val service: ZIO[Has[Accounts] with Has[Transactions], Nothing, ZioService.ZLedger[ZEnv, Any]] = ZIO.access { layer =>
-    val accounts = layer.get[Accounts]
-    val transactions = layer.get[Transactions]
-    new ZioService.ZLedger[ZEnv, Any] {
-      override def openAccount(openAccountRequest: OpenAccountRequest): ZIO[Any, Status, OpenAccountReply] = {
-        accounts(openAccountRequest.accountId).open
-          .bimap(_ => Status.NOT_FOUND, _ => OpenAccountReply().withMessage("Created"))
-          .provideLayer(emptyCombinators)
+  val live: ZLayer[ZEnv with Requirements, Nothing, Has[ZLedger[Any, Any]]] =
+    new ZioService.ZLedger[ZEnv with Requirements, Any] {
+      def openAccount(openAccountRequest: OpenAccountRequest): ZIO[AccountCombinator with Has[Accounts], Status, OpenAccountReply] = {
+        ZIO.service[Accounts].flatMap { accounts =>
+          accounts(openAccountRequest.accountId).open
+            .bimap(_ => Status.NOT_FOUND, _ => OpenAccountReply().withMessage("Created"))
+        }
       }
 
-      override def authorizePayment(authorizeRequest: AuthorizeRequest): ZIO[Any, Status, AuthorizeReply] = {
-        transactions(authorizeRequest.transactionId)
-          .create(authorizeRequest.from, authorizeRequest.to, authorizeRequest.amount)
-          .bimap(_ => Status.NOT_FOUND, _ => AuthorizeReply().withMessage("Created"))
-          .provideLayer(emptyCombinators)
+      def authorizePayment(
+        authorizeRequest: AuthorizeRequest
+      ): ZIO[TransactionCombinator with Has[Transactions], Status, AuthorizeReply] = {
+        ZIO.service[Transactions].flatMap { transactions =>
+          transactions(authorizeRequest.transactionId)
+            .create(authorizeRequest.from, authorizeRequest.to, authorizeRequest.amount)
+            .bimap(_ => Status.NOT_FOUND, _ => AuthorizeReply().withMessage("Created"))
+        }
       }
-    }
-  }
-
-  val live: ZLayer[Has[Accounts] with Has[Transactions], Nothing, Has[ZLedger[ZEnv, Any]]] = service.toLayer
+    }.toLayer
 
 }

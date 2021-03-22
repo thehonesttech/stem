@@ -11,14 +11,14 @@ import zio._
 
 // implementations should commit into offset store
 trait JournalQuery[O, K, E] {
-  def eventsByTag(tag: EventTag, offset: Option[O]): ZStream[Clock, Throwable, JournalEntry[O, K, E]]
+  def eventsByTag(tag: EventTag, offset: Option[O]): ZStream[Any, Throwable, JournalEntry[O, K, E]]
 
   def currentEventsByTag(tag: EventTag, offset: Option[O]): Stream[Throwable, JournalEntry[O, K, E]]
 
 }
 
 trait CommittableJournalQuery[O, K, E] {
-  def eventsByTag(tag: EventTag, consumerId: ConsumerId): ZStream[Clock, Throwable, Committable[JournalEntry[O, K, E]]]
+  def eventsByTag(tag: EventTag, consumerId: ConsumerId): ZStream[Any, Throwable, Committable[JournalEntry[O, K, E]]]
 
   def currentEventsByTag(tag: EventTag, consumerId: ConsumerId): Stream[Throwable, Committable[JournalEntry[O, K, E]]]
 
@@ -42,7 +42,7 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
       .map(x => Committable(offsetStore.setValue(tagConsumerId, x.offset), x))
   }
 
-  def eventsByTag(tag: EventTag, consumerId: ConsumerId): ZStream[Clock, Throwable, Committable[JournalEntry[O, K, E]]] =
+  def eventsByTag(tag: EventTag, consumerId: ConsumerId): ZStream[Any, Throwable, Committable[JournalEntry[O, K, E]]] =
     mkCommittableSource(tag, consumerId, delegateEventJournal.eventsByTag(tag, _))
 
   def currentEventsByTag(tag: EventTag, consumerId: ConsumerId): Stream[Throwable, Committable[JournalEntry[O, K, E]]] = {
@@ -51,7 +51,7 @@ class CommittableJournalStore[O, K, E](offsetStore: KeyValueStore[TagConsumer, O
 }
 
 object JournalStores {
-  def memoryJournalStoreLayer[K: Tag, E: Tag](pollingInterval: duration.Duration): ZLayer[Any, Nothing, Has[MemoryEventJournal[K, E]]] = {
+  def memoryJournalStoreLayer[K: Tag, E: Tag](pollingInterval: duration.Duration): ZLayer[Clock, Nothing, Has[MemoryEventJournal[K, E]]] = {
     MemoryEventJournal.make[K, E](pollingInterval).toLayer
   }
 
