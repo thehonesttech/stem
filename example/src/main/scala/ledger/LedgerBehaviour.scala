@@ -65,7 +65,7 @@ object LedgerServer extends ServerMain {
 
   private val buildSystem: ZLayer[ZEnv, Throwable, Has[ZLedger[Any, Any]]] =
     ZLayer
-      .fromSomeMagic[ZEnv, Has[ZLedger[Any, Any]]](
+      .wireSome[ZEnv, Has[ZLedger[Any, Any]]](
         StemApp.actorSettings("System"),
         accountStores,
         transactionStores,

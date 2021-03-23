@@ -48,7 +48,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
           assert(initialState)(equalTo(ActiveAccount(0, Set()))) &&
           assert(updatedState)(equalTo(ActiveAccount(10, Set("accountTransactionId")))) &&
           assert(stateFromSnapshot)(equalTo(Option(Versioned(2, ActiveAccount(10, Set("accountTransactionId")): AccountState))))
-        }).provideSomeMagicLayer[TestEnvironment](
+        }).injectSome[TestEnvironment](
           testStemtityAndStores[AccountId, AccountCommandHandler, AccountState, AccountEvent, String](
             AccountEntity.tagging,
             EventSourcedBehaviour(new AccountCommandHandler(), AccountEntity.eventHandlerLogic, AccountEntity.errorHandler),
@@ -80,8 +80,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             assert(stateInitialFrom)(equalTo(ActiveAccount(20, Set("accountTransactionId")))) &&
             assert(result)(equalTo(AuthorizeReply("Created"))) &&
             assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId"))))
-          }).provideSomeMagicLayer[TestEnvironment](
-            magic
+          }).injectSome[TestEnvironment](
+            env
           )
         },
         testM("End to end test using Kafka") {
@@ -105,7 +105,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
             assert(stateInitialTo)(equalTo(ActiveAccount(0, Set()))) &&
             assert(stateInitialFrom)(equalTo(ActiveAccount(20, Set("accountTransactionId")))) &&
             assert(updatedState)(equalTo(ActiveAccount(10, Set("transactionId"))))
-          }).provideSomeMagicLayer[TestEnvironment](magic)
+          }).injectSome[TestEnvironment](env)
         }
       )
     )
@@ -133,10 +133,10 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
   private val kafka = TestKafkaMessageConsumer
     .memory[LedgerId, LedgerInstructionsMessage, String]
 
-  private val magic
+  private val env
     : ZLayer[TestEnvironment, Throwable, TestTransactions with TestAccounts with Has[ZLedger[Any, Any]] with Has[TestReadSideProcessor[String]] with TestKafkaConsumer] =
     ZLayer
-      .fromSomeMagic[TestEnvironment, TestTransactions with TestAccounts with Has[
+      .wireSome[TestEnvironment, TestTransactions with TestAccounts with Has[
         ZLedger[Any, Any]
       ] with Has[TestReadSideProcessor[String]] with TestConsumer[LedgerId, LedgerInstructionsMessage, String]](
         accountLayers,
