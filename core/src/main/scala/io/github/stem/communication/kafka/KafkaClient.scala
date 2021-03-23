@@ -45,24 +45,34 @@ object MessageConsumerSubscriber {
   type MessageConsumerSubscriber = Has[MessageConsumerSubscriber.Service]
 
   trait Service {
-    def consumeForever: ZIO[Console with Clock with Blocking, Nothing, SubscriptionKillSwitch]
+    def consumeForever: UIO[SubscriptionKillSwitch]
   }
 
-  val live = ZIO.access[ZStream[Clock with Blocking, String, Unit]] { messageStream =>
-    new Service {
-      private val scheduleEvery5Seconds = Schedule
-        .spaced(5.seconds)
-        .onDecision({
-          case Decision.Done(_)                 => putStrLn(s"Reconnection successfull")
-          case Decision.Continue(attempt, _, _) => putStrLn(s"Error while reconnecting attempt #$attempt")
-        })
+  def consumeForever: ZIO[MessageConsumerSubscriber, Nothing, SubscriptionKillSwitch] = ZIO.accessM[MessageConsumerSubscriber](_.get.consumeForever)
 
-      val consumeForever: ZIO[Console with Clock with Blocking, Nothing, SubscriptionKillSwitch] = {
-        val killSwitch = SubscriptionKillSwitch(Task.unit)
-        messageStream.interruptWhen(killSwitch.shutdown).runDrain.retry(scheduleEvery5Seconds).fork.as(killSwitch)
-      }
+  val live =
+    ZLayer.fromServices[ZStream[Clock with Blocking, String, Unit], Clock.Service, Console.Service, Blocking.Service, Service] {
+      (messageStream, clock, console, blocking) =>
+        new Service {
+          private val scheduleEvery5Seconds = Schedule
+            .spaced(5.seconds)
+            .onDecision({
+              case Decision.Done(_)                 => console.putStrLn(s"Reconnection successfull")
+              case Decision.Continue(attempt, _, _) => console.putStrLn(s"Error while reconnecting attempt #$attempt")
+            })
+
+          val consumeForever: UIO[SubscriptionKillSwitch] = {
+            val killSwitch = SubscriptionKillSwitch(Task.unit)
+            messageStream
+              .interruptWhen(killSwitch.shutdown)
+              .runDrain
+              .retry(scheduleEvery5Seconds)
+              .fork
+              .as(killSwitch)
+              .provideLayer(ZLayer.succeed(clock) and ZLayer.succeed(blocking) and ZLayer.succeed(blocking))
+          }
+        }
     }
-  }
 }
 
 case class SubscriptionKillSwitch(shutdown: Task[Unit])

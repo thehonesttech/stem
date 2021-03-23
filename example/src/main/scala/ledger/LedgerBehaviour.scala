@@ -4,6 +4,7 @@ import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
 import io.github.stem.StemApp
 import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
+import io.github.stem.communication.kafka.MessageConsumerSubscriber.MessageConsumerSubscriber
 import io.github.stem.communication.kafka._
 import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data._
@@ -169,16 +170,13 @@ object LedgerInboundMessageHandling {
       }
     }
 
-  val liveHandler = messageHandling.toLayer
+  val liveHandler: ZLayer[Has[Accounts] with Has[Transactions], Throwable, Has[(LedgerId, LedgerInstructionsMessage) => IO[String, Unit]]] =
+    messageHandling.toLayer
 
-  val live: ZLayer[Console with Clock with Blocking with Has[LedgerMessageConsumer], Nothing, Has[SubscriptionKillSwitch]] =
+  val live: ZLayer[Console with MessageConsumerSubscriber, Nothing, Has[SubscriptionKillSwitch]] =
     ZLayer.fromManaged(
       Managed.make(
-        for {
-          stream     <- ZIO.service[LedgerMessageConsumer]
-          service    <- MessageConsumerSubscriber.live.provide(stream.messageStream)
-          killSwitch <- service.consumeForever
-        } yield killSwitch
+        MessageConsumerSubscriber.consumeForever
       )(_.shutdown.exitCode)
     )
 }
