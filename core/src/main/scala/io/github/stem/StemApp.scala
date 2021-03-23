@@ -5,7 +5,7 @@ import com.typesafe.config.ConfigFactory
 import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
 import io.github.stem.journal.{EventJournal, JournalEntry}
-import io.github.stem.readside.ReadSideProcessing.{KillSwitch, Process, RunningProcess}
+import io.github.stem.readside.ReadSideProcessing.{KillSwitch, Process, ReadSideProcessing, RunningProcess}
 import io.github.stem.readside.{ReadSideProcessing, ReadSideSettings}
 import io.github.stem.runtime.akka.RuntimeSettings
 import io.github.stem.runtime.readside.CommittableJournalQuery
@@ -38,10 +38,10 @@ object StemApp {
   def readSideStream[Id: Tag, Event: Tag, Offset: Tag, Reject](
     readSideParams: ReadSideParams[Id, Event, Reject],
     errorHandler: Throwable => Reject
-  ): ZStream[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] = {
+  ): ZStream[Clock with ReadSideProcessing with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] = {
     // simplify and then improve it
     ZStream.accessStream { layers =>
-      val readSideProcessing = layers.get[ReadSideProcessing]
+      val readSideProcessing = layers.get[ReadSideProcessing.Service]
       val journal = layers.get[CommittableJournalQuery[Offset, Id, Event]]
       val sources: Seq[ZStream[Any, Reject, Committable[JournalEntry[Offset, Id, Event]]]] = readSideParams.tagging.tags.map { tag =>
         journal.eventsByTag(tag, readSideParams.consumerId).mapError(errorHandler)
@@ -72,7 +72,7 @@ object StemApp {
   def readSideSubscription[Id: Tag, Event: Tag, Offset: Tag, Reject](
     readsideParams: ReadSideParams[Id, Event, Reject],
     errorHandler: Throwable => Reject
-  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] =
+  )(implicit runtime: Runtime[ZEnv]): ZIO[Clock with ReadSideProcessing with Has[CommittableJournalQuery[Offset, Id, Event]], Reject, KillSwitch] =
     readSideStream[Id, Event, Offset, Reject](readsideParams, errorHandler).runLast.map(_.getOrElse(KillSwitch(Task.unit)))
 
   case class ReadSideParams[Id, Event, Reject](

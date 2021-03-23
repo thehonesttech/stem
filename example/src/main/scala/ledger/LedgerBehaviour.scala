@@ -9,6 +9,7 @@ import io.github.stem.communication.kafka._
 import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data._
 import io.github.stem.readside.ReadSideProcessing
+import io.github.stem.readside.ReadSideProcessing.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
 import io.grpc.Status
 import ledger.LedgerGrpcService.{Accounts, Transactions}
@@ -20,7 +21,6 @@ import ledger.messages.messages._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 import transactions.TransactionEntity.TransactionCommandHandler
 import transactions.{TransactionEntity, TransactionId}
-import zio.blocking.Blocking
 import zio.clock.Clock
 import zio.console.Console
 import zio.duration.{durationInt, Duration}
@@ -133,7 +133,7 @@ object TransactionReadSideProcessor {
       ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ProcessReadSide].process)
     }
 
-  val live: ZLayer[Console with Clock with Has[ReadSideProcessing] with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with Has[
+  val live: ZLayer[Console with Clock with ReadSideProcessing with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with Has[
     ProcessReadSide
   ], String, Has[
     ReadSideProcessing.KillSwitch

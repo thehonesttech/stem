@@ -1,8 +1,5 @@
 package io.github.stem.readside
 
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
-
 import akka.actor.ActorSystem
 import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
 import akka.pattern.{ask, BackoffOpts, BackoffSupervisor}
@@ -11,20 +8,17 @@ import io.github.stem.readside.ReadSideProcessing.{KillSwitch, _}
 import io.github.stem.readside.ReadSideWorkerActor.KeepRunning
 import zio.clock.Clock
 import zio.stream.ZStream
-import zio.{Has, IO, Runtime, Task, UIO, ULayer, ZEnv, ZIO, ZLayer}
+import zio.{Has, Task, UIO, ULayer, ZIO, ZLayer}
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.{FiniteDuration, _}
-
-trait ReadSideProcessing {
-
-  def start(name: String, processes: List[Process]): Task[KillSwitch]
-}
 
 trait ReadSideProcessor[Reject] {
   def readSideStream: ZStream[Clock, Reject, KillSwitch]
 }
 
-final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing {
+final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing.Service {
 
   /**
     * Starts `processes` distributed over underlying akka cluster.
@@ -76,6 +70,7 @@ final class ActorReadSideProcessing private (system: ActorSystem, settings: Read
 }
 
 object ReadSideProcessing {
+  type ReadSideProcessing = Has[ReadSideProcessing.Service]
 
   final case class KillSwitch(shutdown: Task[Unit]) extends AnyVal
 
@@ -83,25 +78,31 @@ object ReadSideProcessing {
 
   final case class Process(run: Task[RunningProcess]) extends AnyVal
 
-  val actorBased: ZLayer[Has[ActorSystem] with Has[ReadSideSettings], Nothing, Has[ReadSideProcessing]] =
-    ZLayer.fromServices[ActorSystem, ReadSideSettings, ReadSideProcessing] { (actorSystem: ActorSystem, readSideSettings: ReadSideSettings) =>
+  trait Service {
+
+    def start(name: String, processes: List[Process]): Task[KillSwitch]
+  }
+
+  def start(name: String, processes: List[Process]): ZIO[ReadSideProcessing, Throwable, KillSwitch] =
+    ZIO.accessM[ReadSideProcessing](_.get.start(name, processes))
+
+  val actorBased: ZLayer[Has[ActorSystem] with Has[ReadSideSettings], Nothing, ReadSideProcessing] =
+    ZLayer.fromServices[ActorSystem, ReadSideSettings, ReadSideProcessing.Service] { (actorSystem: ActorSystem, readSideSettings: ReadSideSettings) =>
       ActorReadSideProcessing(actorSystem, readSideSettings)
     }
 
-  val memory: ULayer[Has[ReadSideProcessing]] = ZLayer.succeed {
-    new ReadSideProcessing {
-      def start(name: String, processes: List[Process]): Task[KillSwitch] = {
-        for {
-          tasksToShutdown <- ZIO.foreach(processes)(process => process.run)
-        } yield KillSwitch(ZIO.foreach(tasksToShutdown)(_.shutdown).as())
-      }
+  val memory: ULayer[ReadSideProcessing] = ZLayer.succeed { (name: String, processes: List[Process]) =>
+    {
+      for {
+        tasksToShutdown <- ZIO.foreach(processes)(process => process.run)
+      } yield KillSwitch(ZIO.foreach(tasksToShutdown)(_.shutdown).as())
     }
   }
 
 }
 
 object ActorReadSideProcessing {
-  def apply(system: ActorSystem, settings: ReadSideSettings): ReadSideProcessing = new ActorReadSideProcessing(system, settings)
+  def apply(system: ActorSystem, settings: ReadSideSettings): ReadSideProcessing.Service = new ActorReadSideProcessing(system, settings)
 
 }
 
