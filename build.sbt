@@ -123,10 +123,7 @@ val exampleDeps = Seq(
 
 val testDeps = Seq(
   "org.scalatest" %% "scalatest" % "3.1.1" % Test,
-  "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
-  "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
-  "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.5",
+  "dev.zio" %% "zio-test" % "1.0.5" % Test,
   "dev.zio" %% "zio-test-sbt" % "1.0.5" % Test,
   "dev.zio" %% "zio-test-magnolia" % "1.0.5" % Test
 )
