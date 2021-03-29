@@ -142,8 +142,8 @@ val allDeps = Seq(
   "org.scodec" %% "scodec-bits" % "1.1.13",
   "org.scodec" %% "scodec-core" % "1.11.4",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
-  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0" % "protobuf",
-  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0",
+  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.1-1" % "protobuf",
+  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.1-1",
   "io.github.kitlangton" %% "zio-magic" % "0.2.0",
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps
