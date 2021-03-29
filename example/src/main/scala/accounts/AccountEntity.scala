@@ -14,6 +14,8 @@ import scalapb.TypeMapper
 import zio.IO
 
 object AccountEntity {
+  type Accounts = AccountId => AccountCommandHandler
+  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
 
   class AccountCommandHandler {
     type SIO[Response] = StemApp.SIO[AccountState, AccountEvent, String, Response]

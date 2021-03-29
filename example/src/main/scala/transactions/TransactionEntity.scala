@@ -17,6 +17,10 @@ import zio.{IO, Runtime}
 import io.github.stem.data.AlgebraCombinators._
 
 object TransactionEntity {
+
+  type Transactions = TransactionId => TransactionCommandHandler
+  type TransactionCombinator = Combinators[TransactionState, TransactionEvent, String]
+
   implicit val runtime: Runtime[zio.ZEnv] = LedgerServer
 
   class TransactionCommandHandler {

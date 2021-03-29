@@ -1,6 +1,6 @@
 package ledger
 
-import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
+import accounts.AccountEntity.{errorHandler, AccountCombinator, AccountCommandHandler, Accounts}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
 import io.github.stem.StemApp
 import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
@@ -12,14 +12,14 @@ import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.readside.ReadSideProcessing.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
 import io.grpc.Status
-import ledger.LedgerServer.{AccountCombinator, Accounts, AllCombinators, TransactionCombinator, Transactions}
+import ledger.LedgerServer.AllCombinators
 import ledger.ProcessReadSide.ProcessReadSide
 import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
 import ledger.eventsourcing.events._
 import ledger.messages.messages._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
-import transactions.TransactionEntity.TransactionCommandHandler
+import transactions.TransactionEntity.{TransactionCombinator, TransactionCommandHandler, Transactions}
 import transactions.{TransactionEntity, TransactionId}
 import zio.clock.Clock
 import zio.console.Console
@@ -37,12 +37,8 @@ case class Denied(reason: String) extends LockResponse
 object LedgerServer extends ServerMain {
 
   type LedgerCombinator = AlgebraCombinators.Service[Int, AccountEvent, String]
-
-  type Accounts = AccountId => AccountCommandHandler
-  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
-  type TransactionCombinator = Combinators[TransactionState, TransactionEvent, String]
   type AllCombinators = AccountCombinator with TransactionCombinator
-  type Transactions = TransactionId => TransactionCommandHandler
+
   val readSidePollingInterval: Duration = 100.millis
 
   private val messageHandling = LedgerInboundMessageHandling.messageHandling

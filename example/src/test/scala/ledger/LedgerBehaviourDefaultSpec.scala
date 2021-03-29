@@ -1,6 +1,6 @@
 package ledger
 
-import accounts.AccountEntity.{errorHandler, AccountCommandHandler}
+import accounts.AccountEntity.{errorHandler, AccountCommandHandler, Accounts}
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
 import io.github.stem.data.Versioned
 import io.github.stem.readside.ReadSideProcessing
@@ -8,7 +8,6 @@ import io.github.stem.runtime.akka.EventSourcedBehaviour
 import io.github.stem.test.StemtityProbe
 import io.github.stem.test.TestStemRuntime.TestReadSideProcessor.TestReadSideProcessor
 import io.github.stem.test.TestStemRuntime._
-import ledger.LedgerServer.Accounts
 import ledger.LedgerTest._
 import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
