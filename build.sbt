@@ -144,7 +144,7 @@ val allDeps = Seq(
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0" % "protobuf",
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0",
-  "io.github.kitlangton" %% "zio-magic" % "0.2.2",
+  "io.github.kitlangton" %% "zio-magic" % "0.2.0",
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps
 
