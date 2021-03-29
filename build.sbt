@@ -1,7 +1,7 @@
 import sbtrelease.ReleaseStateTransformations.{checkSnapshotDependencies, commitNextVersion, commitReleaseVersion, inquireVersions, publishArtifacts, pushChanges, runClean, runTest, setNextVersion, setReleaseVersion, tagRelease}
 import sbtrelease.Version.Bump
 
-val grpcVersion = "1.34.1"
+val grpcVersion = "1.36.1"
 
 //inThisBuild(
 //   List(
