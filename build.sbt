@@ -1,7 +1,7 @@
 import sbtrelease.ReleaseStateTransformations.{checkSnapshotDependencies, commitNextVersion, commitReleaseVersion, inquireVersions, publishArtifacts, pushChanges, runClean, runTest, setNextVersion, setReleaseVersion, tagRelease}
 import sbtrelease.Version.Bump
 
-val grpcVersion = "1.34.0"
+val grpcVersion = "1.34.1"
 
 //inThisBuild(
 //   List(
@@ -122,28 +122,25 @@ val exampleDeps = Seq(
 )
 
 val testDeps = Seq(
-  "org.scalatest" %% "scalatest" % "3.1.4" % Test,
-  "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
-  "org.scalatestplus" %% "scalacheck-1-14" % "3.2.0.0" % Test,
-  "com.github.chocpanda" %% "scalacheck-magnolia" % "0.4.0" % Test,
-  "dev.zio" %% "zio-test" % "1.0.5",
+  "org.scalatest" %% "scalatest" % "3.1.1" % Test,
+  "dev.zio" %% "zio-test" % "1.0.5" % Test,
   "dev.zio" %% "zio-test-sbt" % "1.0.5" % Test,
   "dev.zio" %% "zio-test-magnolia" % "1.0.5" % Test
 )
 
 val allDeps = Seq(
-  "org.apache.kafka" % "kafka-clients" % "2.1.0",
-  "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.31",
-  "com.typesafe.akka" %% "akka-cluster" % "2.5.31",
+  "org.apache.kafka" % "kafka-clients" % "2.7.0",
+  "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.32",
+  "com.typesafe.akka" %% "akka-cluster" % "2.5.32",
   "dev.zio" %% "zio-streams" % "1.0.5",
-  "dev.zio" %% "zio-kafka" % "0.13.0",
-  "io.suzaku" %% "boopickle" % "1.3.2",
+  "dev.zio" %% "zio-kafka" % "0.14.0",
+  "io.suzaku" %% "boopickle" % "1.3.3",
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0",
-  "org.scodec" %% "scodec-bits" % "1.1.13",
-  "org.scodec" %% "scodec-core" % "1.11.4",
+  "org.scodec" %% "scodec-bits" % "1.1.24",
+  "org.scodec" %% "scodec-core" % "1.11.7",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
-  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0" % "protobuf",
-  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.0-0",
+  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.1-1" % "protobuf",
+  "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.1-1",
   "io.github.kitlangton" %% "zio-magic" % "0.2.0",
   "io.grpc" % "grpc-netty" % grpcVersion,
 ) ++ testDeps

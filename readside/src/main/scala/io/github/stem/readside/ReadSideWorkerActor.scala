@@ -34,30 +34,29 @@ final class ReadSideWorkerActor(
   override def postStop(): Unit =
     killSwitch.foreach(el => runtime.unsafeRun(el))
 
-  def receive: Receive = {
-    case KeepRunning(workerId) =>
-      log.info("[{}] Starting process {}", workerId, processName)
-      runtime.unsafeRunToFuture(
-        processFor(workerId).run
-          .map(ProcessStarted)
-      ) pipeTo self
-      context.become {
-        case ProcessStarted(RunningProcess(watchTermination, terminate)) =>
-          log.info("[{}] Process started {}", workerId, processName)
-          killSwitch = Some(terminate)
-          runtime.unsafeRunToFuture(watchTermination.as(ProcessTerminated)) pipeTo self
-          context.become {
-            case Status.Failure(e) =>
-              log.error(e, "Process failed {}", processName)
-              throw e
-            case ProcessTerminated =>
-              log.error("Process terminated {}", processName)
-              throw new IllegalStateException(s"Process terminated $processName")
-          }
-        case Status.Failure(e) =>
-          log.error(e, "Process failed to start {}", processName)
-          throw e
-        case KeepRunning(_) => ()
-      }
+  def receive: Receive = { case KeepRunning(workerId) =>
+    log.info("[{}] Starting process {}", workerId, processName)
+    runtime.unsafeRunToFuture(
+      processFor(workerId).run
+        .map(ProcessStarted)
+    ) pipeTo self
+    context.become {
+      case ProcessStarted(RunningProcess(watchTermination, terminate)) =>
+        log.info("[{}] Process started {}", workerId, processName)
+        killSwitch = Some(terminate)
+        runtime.unsafeRunToFuture(watchTermination.as(ProcessTerminated)) pipeTo self
+        context.become {
+          case Status.Failure(e) =>
+            log.error(e, "Process failed {}", processName)
+            throw e
+          case ProcessTerminated =>
+            log.error("Process terminated {}", processName)
+            throw new IllegalStateException(s"Process terminated $processName")
+        }
+      case Status.Failure(e) =>
+        log.error(e, "Process failed to start {}", processName)
+        throw e
+      case KeepRunning(_) => ()
+    }
   }
 }
