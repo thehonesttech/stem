@@ -134,8 +134,9 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
     .memory[LedgerId, LedgerInstructionsMessage, String]
   private val testReadSideProcessor = TestReadSideProcessor
     .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler)
-  private val env
-    : ZLayer[TestEnvironment, Throwable, TestTransactions with TestAccounts with Has[ZLedger[Any, Any]] with Has[TestReadSideProcessor[String]] with TestKafkaConsumer] =
+  private val env: ZLayer[TestEnvironment, Throwable, TestTransactions with TestAccounts with Has[ZLedger[Any, Any]] with Has[
+    TestReadSideProcessor[String]
+  ] with TestKafkaConsumer] =
     ZLayer
       .wireSome[TestEnvironment, TestTransactions with TestAccounts with Has[
         ZLedger[Any, Any]

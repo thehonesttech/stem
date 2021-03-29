@@ -4,8 +4,7 @@ import io.github.stem.data.{EntityEvent, Tagging}
 import zio.stream.Stream
 import zio.{NonEmptyChunk, RIO}
 
-/**
-  * Describes abstract event journal.
+/** Describes abstract event journal.
   *
   * It is expected that sequence number of the first event is 1.
   *

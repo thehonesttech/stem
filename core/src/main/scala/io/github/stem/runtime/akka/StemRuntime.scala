@@ -25,8 +25,8 @@ object StemRuntime {
     typeName: String,
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
-  )(
-    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  )(implicit
+    protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[ActorSystem] with Has[RuntimeSettings] with Has[EventJournal[Key, Event]], Throwable, Key => Algebra] = {
     ZIO.accessM { layer =>
       val memoryEventJournal = layer.get[EventJournal[Key, Event]]
@@ -48,16 +48,15 @@ object StemRuntime {
     typeName: String,
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-  )(
-    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  )(implicit
+    protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZIO[Has[ActorSystem] with Has[RuntimeSettings], Throwable, Key => Algebra] = ZIO.access { layer =>
     val system = layer.get[ActorSystem]
     val settings = layer.get[RuntimeSettings]
     val props = StemActor.props[Key, Algebra, State, Event, Reject](eventSourcedBehaviour, algebraCombinatorConfig)
 
-    val extractEntityId: ShardRegion.ExtractEntityId = {
-      case KeyedCommand(entityId, c) =>
-        (entityId, CommandInvocation(c))
+    val extractEntityId: ShardRegion.ExtractEntityId = { case KeyedCommand(entityId, c) =>
+      (entityId, CommandInvocation(c))
     }
 
     val numberOfShards = settings.numberOfShards
@@ -93,8 +92,8 @@ object StemRuntime {
 }
 
 object KeyAlgebraSender {
-  def keyToAlgebra[Key, Algebra, State, Event, Reject](senderFn: (Key, BitVector) => Task[Any], errorHandler: Throwable => Reject)(
-    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  def keyToAlgebra[Key, Algebra, State, Event, Reject](senderFn: (Key, BitVector) => Task[Any], errorHandler: Throwable => Reject)(implicit
+    protocol: StemProtocol[Algebra, State, Event, Reject]
   ): Key => Algebra = { key: Key =>
     {
       // implementation of algebra that transform the method in bytes inject the function in it
@@ -125,8 +124,7 @@ final case class RuntimeSettings(
 
 object RuntimeSettings {
 
-  /**
-    * Reads config from `io.github.stem.akka-runtime`, see io.github.stem.conf for details
+  /** Reads config from `io.github.stem.akka-runtime`, see io.github.stem.conf for details
     *
     * @param system Actor system to get config from
     * @return default settings
