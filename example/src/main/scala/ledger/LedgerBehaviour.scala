@@ -12,7 +12,7 @@ import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.readside.ReadSideProcessing.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
 import io.grpc.Status
-import ledger.LedgerServer.{emptyCombinators, AccountCombinator, Accounts, AllCombinators, TransactionCombinator, Transactions}
+import ledger.LedgerServer.{AccountCombinator, Accounts, AllCombinators, TransactionCombinator, Transactions}
 import ledger.ProcessReadSide.ProcessReadSide
 import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
