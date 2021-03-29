@@ -25,47 +25,46 @@ object TransactionEntity {
 
     @MethodId(1)
     def create(from: AccountId, to: AccountId, amount: BigDecimal): SIO[Unit] = read[TransactionState, TransactionEvent, String]
-        .flatMap {
-          case _: InitialTransaction =>
-            append(TransactionCreated(from = from, to = to, amount))
-          case _ =>
-            ignore
-        }
+      .flatMap {
+        case _: InitialTransaction =>
+          append(TransactionCreated(from = from, to = to, amount))
+        case _ =>
+          ignore
+      }
 
     @MethodId(2)
     def authorise: SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
-        case _: ActiveTransaction =>
-          append(TransactionAuthorized())
-        case _ =>
-          reject("Auth in progress, cannot auth twice")
-      }
-
+      case _: ActiveTransaction =>
+        append(TransactionAuthorized())
+      case _ =>
+        reject("Auth in progress, cannot auth twice")
+    }
 
     @MethodId(3)
     def fail(reason: String): SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
-        case inProgress: ActiveTransaction =>
-          if (inProgress.status == TransactionStatus.Failed) {
-            ignore
-          } else {
-            append(TransactionFailed(reason))
-          }
-        case _ =>
-          reject("Transaction not found")
-      }
+      case inProgress: ActiveTransaction =>
+        if (inProgress.status == TransactionStatus.Failed) {
+          ignore
+        } else {
+          append(TransactionFailed(reason))
+        }
+      case _ =>
+        reject("Transaction not found")
+    }
 
     @MethodId(4)
     def succeed: SIO[Unit] = read[TransactionState, TransactionEvent, String].flatMap {
-        case inProgress: ActiveTransaction =>
-          if (inProgress.status == TransactionStatus.Succeeded) {
-            ignore
-          } else if (inProgress.status == TransactionStatus.Authorized) {
-            append(TransactionSucceeded())
-          } else {
-            reject("Illegal transition")
-          }
-        case _ =>
-          reject("Transaction not found")
-      }
+      case inProgress: ActiveTransaction =>
+        if (inProgress.status == TransactionStatus.Succeeded) {
+          ignore
+        } else if (inProgress.status == TransactionStatus.Authorized) {
+          append(TransactionSucceeded())
+        } else {
+          reject("Illegal transition")
+        }
+      case _ =>
+        reject("Transaction not found")
+    }
 
     @MethodId(5)
     def getInfo: SIO[TransactionInfo] =
@@ -75,8 +74,7 @@ object TransactionEntity {
         case _ =>
           reject("Transaction not found")
       }
-    }
-
+  }
 
   val errorHandler: Throwable => String = _.getMessage
 

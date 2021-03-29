@@ -46,16 +46,15 @@ object LedgerServer extends ServerMain {
   val readSidePollingInterval: Duration = 100.millis
 
   private val messageHandling = LedgerInboundMessageHandling.messageHandling
-    .map(
-      logic =>
-        KafkaMessageConsumer(
-          KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
-            "testtopic",
-            ConsumerSettings(List("0.0.0.0"))
-          ),
-          errorHandler,
-          logic
-        ): MessageConsumer[LedgerId, LedgerInstructionsMessage, String]
+    .map(logic =>
+      KafkaMessageConsumer(
+        KafkaGrpcConsumerConfiguration[LedgerId, LedgerInstructionsMessage, LedgerInstructionsMessageMessage](
+          "testtopic",
+          ConsumerSettings(List("0.0.0.0"))
+        ),
+        errorHandler,
+        logic
+      ): MessageConsumer[LedgerId, LedgerInstructionsMessage, String]
     )
     .toLayer
 
@@ -63,10 +62,10 @@ object LedgerServer extends ServerMain {
   private val transactionStores = StemApp.liveRuntime[TransactionId, TransactionEvent]
 
   private val emptyCombinators: ZLayer[Any, Nothing, AllCombinators] = clientEmptyCombinator[
-      AccountState,
-      AccountEvent,
-      String
-    ] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
+    AccountState,
+    AccountEvent,
+    String
+  ] ++ clientEmptyCombinator[TransactionState, TransactionEvent, String]
 
   private val buildSystem: ZLayer[ZEnv, Throwable, Has[ZLedger[Any, Any]]] =
     ZLayer
@@ -124,7 +123,8 @@ object ProcessReadSide {
                     AccountTransactionId(transactionId.value),
                     txn.amount
                   ) *> transactions(transactionId).fail(rejection)
-                }, { _ =>
+                },
+                { _ =>
                   transactions(transactionId).succeed
                 }
               )
@@ -151,10 +151,11 @@ object TransactionReadSideProcessor {
       ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ProcessReadSide.Service].process)
     }
 
-  val live
-    : ZLayer[Console with Clock with ReadSideProcessing with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with ProcessReadSide, String, Has[
-      ReadSideProcessing.KillSwitch
-    ]] = {
+  val live: ZLayer[Console with Clock with ReadSideProcessing with Has[
+    CommittableJournalQuery[Long, TransactionId, TransactionEvent]
+  ] with ProcessReadSide, String, Has[
+    ReadSideProcessing.KillSwitch
+  ]] = {
     ZLayer.fromAcquireRelease(for {
       readSideParams <- readsideParams
       _              <- ZIO.service[Console.Service]

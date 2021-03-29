@@ -37,11 +37,10 @@ class DeriveMacros(val c: blackbox.Context) {
   private def overridableMembersOf(tpe: Type): Iterable[Symbol] = {
     import definitions._
     val exclude = Set[Symbol](AnyClass, AnyRefClass, AnyValClass, ObjectClass)
-    tpe.members.filterNot(
-      m =>
-        m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
-          m.owner
-        )
+    tpe.members.filterNot(m =>
+      m.isConstructor || m.isFinal || m.isImplementationArtifact || m.isSynthetic || exclude(
+        m.owner
+      )
     )
   }
 
@@ -80,17 +79,16 @@ class DeriveMacros(val c: blackbox.Context) {
     event: c.universe.Type,
     reject: c.universe.Type
   ): Iterable[c.universe.Tree] = {
-    methods.zipWithIndex.map {
-      case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
+    methods.zipWithIndex.map { case (method @ Method(_, _, paramList, TypeRef(_, _, outParams), _, hint), index) =>
 //        println(s"OutParams $outParams on method $method")
 
-        val out = outParams.last
-        val paramTypes = paramList.flatten.map(_.tpt)
-        val args = method.argLists((pn, _) => Ident(pn)).flatten
-        val hintToUse: String = hint.getOrElse(index).toString
+      val out = outParams.last
+      val paramTypes = paramList.flatten.map(_.tpt)
+      val args = method.argLists((pn, _) => Ident(pn)).flatten
+      val hintToUse: String = hint.getOrElse(index).toString
 
-        val code = if (args.isEmpty) {
-          q"""
+      val code = if (args.isEmpty) {
+        q"""
              (for {
                     // start common code
                     arguments <- Task.fromTry(mainCodec.encode(hint -> BitVector.empty).toTry).mapError(errorHandler)
@@ -100,10 +98,10 @@ class DeriveMacros(val c: blackbox.Context) {
                     result <- ZIO.fromEither(decoded)
                } yield result) 
           """
-        } else {
-          val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
-          val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
-          q"""val codecInput = codec[$TupleNCons[..$paramTypes]]
+      } else {
+        val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+        val TupleNConsTerm = TermName(s"Tuple${paramTypes.size}")
+        q"""val codecInput = codec[$TupleNCons[..$paramTypes]]
               val tuple: $TupleNCons[..$paramTypes] = $TupleNConsTerm(..$args)
              
               // if method has a protobuf message, use it, same for response otherwise use boopickle protocol
@@ -118,22 +116,22 @@ class DeriveMacros(val c: blackbox.Context) {
                     result <- ZIO.fromEither(decoded)
                } yield result)"""
 
-        }
+      }
 
-        val newBody =
-          q""" ZIO.accessM { _: Combinators[$state, $event, $reject] =>
+      val newBody =
+        q""" ZIO.accessM { _: Combinators[$state, $event, $reject] =>
                        val hint = $hintToUse
                        
                        val codecResult = codec[Either[$reject, $out]]
                        
                        ..$code
                      }"""
-        method.copy(body = newBody).definition
+      method.copy(body = newBody).definition
     }
   }
 
-  def derive[Algebra, State, Event, Reject](
-    implicit algebraTag: c.WeakTypeTag[Algebra],
+  def derive[Algebra, State, Event, Reject](implicit
+    algebraTag: c.WeakTypeTag[Algebra],
     statetag: c.WeakTypeTag[State],
     eventtag: c.WeakTypeTag[Event],
     rejecttag: c.WeakTypeTag[Reject]
@@ -148,37 +146,36 @@ class DeriveMacros(val c: blackbox.Context) {
     val stubbedMethods: Iterable[Tree] = stubMethodsForClient(methods, state, event, reject)
     // function hint, bitvector to Task[bitvector]
     val serverHintBitVectorFunction: Tree = {
-      methods.zipWithIndex.foldLeft[Tree](q"""throw new IllegalArgumentException(s"Unknown type tag $$hint")""") {
-        case (acc, (method, index)) =>
-          val Method(name, _, paramList, TypeRef(_, _, outParams), _, hint) = method
+      methods.zipWithIndex.foldLeft[Tree](q"""throw new IllegalArgumentException(s"Unknown type tag $$hint")""") { case (acc, (method, index)) =>
+        val Method(name, _, paramList, TypeRef(_, _, outParams), _, hint) = method
 
-          val hintToUse = hint.getOrElse(index).toString
+        val hintToUse = hint.getOrElse(index).toString
 
-          val out = outParams.last
-          val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
-          val argsTerm =
-            if (argList.isEmpty) q""
-            else {
-              val paramTypes = paramList.flatten.map(_.tpt)
-              val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
+        val out = outParams.last
+        val argList = paramList.map(x => (1 to x.size).map(i => q"args.${TermName(s"_$i")}"))
+        val argsTerm =
+          if (argList.isEmpty) q""
+          else {
+            val paramTypes = paramList.flatten.map(_.tpt)
+            val TupleNCons = TypeName(s"Tuple${paramTypes.size}")
 
-              q"""
+            q"""
                val codecInput = codec[$TupleNCons[..$paramTypes]]
                """
-            }
+          }
 
-          def runImplementation =
-            if (argList.isEmpty)
-              q"algebra.$name.either"
-            else
-              q"algebra.$name(...$argList).either"
+        def runImplementation =
+          if (argList.isEmpty)
+            q"algebra.$name.either"
+          else
+            q"algebra.$name(...$argList).either"
 
-          val codecInputCode =
-            if (argList.isEmpty) q"Task.unit"
-            else
-              q"""Task.fromTry(codecInput.decodeValue(arguments).toTry)"""
-          val invocation =
-            q"""
+        val codecInputCode =
+          if (argList.isEmpty) q"Task.unit"
+          else
+            q"""Task.fromTry(codecInput.decodeValue(arguments).toTry)"""
+        val invocation =
+          q"""
               val codecResult = codec[Either[$reject, $out]]
               ..$argsTerm
               for {
@@ -187,7 +184,7 @@ class DeriveMacros(val c: blackbox.Context) {
                   vector <- Task.fromTry(codecResult.encode(result).toTry)
               } yield vector
               """
-          q"""
+        q"""
              if (hint == $hintToUse) { $invocation } else $acc"""
       }
     }

@@ -24,12 +24,10 @@ object ReadSideProcessor {
 
 final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing.Service {
 
-  /**
-    * Starts `processes` distributed over underlying akka cluster.
+  /** Starts `processes` distributed over underlying akka cluster.
     *
     * @param name      - type name of underlying cluster sharding
     * @param processes - list of processes to distribute
-    *
     */
   def start(name: String, processes: List[Process]): Task[KillSwitch] = {
     ZIO.runtime[Any].flatMap { runtime =>
@@ -49,8 +47,8 @@ final class ActorReadSideProcessing private (system: ActorSystem, settings: Read
           typeName = name,
           entityProps = props,
           settings = settings.clusterShardingSettings,
-          extractEntityId = {
-            case c @ KeepRunning(workerId) => (workerId.toString, c)
+          extractEntityId = { case c @ KeepRunning(workerId) =>
+            (workerId.toString, c)
           },
           extractShardId = {
             case KeepRunning(workerId) => (workerId % settings.numberOfShards).toString

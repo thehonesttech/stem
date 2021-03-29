@@ -47,24 +47,23 @@ object StemApp {
         journal.eventsByTag(tag, readSideParams.consumerId).mapError(errorHandler)
       }
       // convert into process
-      ZStream.fromEffect(buildStreamAndProcesses(sources)).flatMap {
-        case (streams, processes) =>
-          ZStream.fromEffect(readSideProcessing.start(readSideParams.name, processes.toList).mapError(errorHandler)).flatMap { ks =>
-            // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
-            streams
-              .map { stream =>
-                stream
-                  .mapMPar(readSideParams.parallelism) { element =>
-                    val journalEntry = element.value
-                    val commit = element.commit
-                    val key = journalEntry.event.entityKey
-                    val event = journalEntry.event.payload
-                    readSideParams.logic(key, event).retry(Schedule.fixed(1.second)) <* commit.mapError(errorHandler)
-                  }
-              }
-              .flattenPar(sources.size)
-              .as(ks)
-          }
+      ZStream.fromEffect(buildStreamAndProcesses(sources)).flatMap { case (streams, processes) =>
+        ZStream.fromEffect(readSideProcessing.start(readSideParams.name, processes.toList).mapError(errorHandler)).flatMap { ks =>
+          // it starts only when all the streams start, it should dynamically merge (see flattenPar but tests fail with it)
+          streams
+            .map { stream =>
+              stream
+                .mapMPar(readSideParams.parallelism) { element =>
+                  val journalEntry = element.value
+                  val commit = element.commit
+                  val key = journalEntry.event.entityKey
+                  val event = journalEntry.event.payload
+                  readSideParams.logic(key, event).retry(Schedule.fixed(1.second)) <* commit.mapError(errorHandler)
+                }
+            }
+            .flattenPar(sources.size)
+            .as(ks)
+        }
       }
     }
   }
