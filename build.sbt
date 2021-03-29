@@ -109,8 +109,8 @@ lazy val root = (project in file("."))
     inThisBuild(
       List(
         organization := "io.github.thehonesttech",
-        scalaVersion := "2.13.3",
-        version := "0.1.1-SNAPSHOT"
+        scalaVersion := "2.13.4",
+        version := "0.1.2-SNAPSHOT"
       )
     ),
     name := "Stem",

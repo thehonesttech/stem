@@ -61,6 +61,7 @@ object LedgerServer extends ServerMain {
   private val accountStores = StemApp.liveRuntime[AccountId, AccountEvent]
   private val transactionStores = StemApp.liveRuntime[TransactionId, TransactionEvent]
 
+  // TODO: create a macro to build empty combinators
   private val emptyCombinators: ZLayer[Any, Nothing, AllCombinators] = clientEmptyCombinator[
     AccountState,
     AccountEvent,
