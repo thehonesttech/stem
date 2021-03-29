@@ -19,11 +19,7 @@ object ReadSideSupervisor {
     Props(new ReadSideSupervisor(processCount, shardRegion, heartbeatInterval))
 }
 
-final class ReadSideSupervisor(processCount: Int,
-                               shardRegion: ActorRef,
-                               heartbeatInterval: FiniteDuration)
-  extends Actor
-    with ActorLogging {
+final class ReadSideSupervisor(processCount: Int, shardRegion: ActorRef, heartbeatInterval: FiniteDuration) extends Actor with ActorLogging {
 
   import context.dispatcher
 
@@ -48,11 +44,10 @@ final class ReadSideSupervisor(processCount: Int,
       log.info(s"Performing graceful shutdown of [$shardRegion]")
       shardRegion ! ShardRegion.GracefulShutdown
       val replyTo = sender()
-      context.become {
-        case Terminated(`shardRegion`) =>
-          log.info(s"Graceful shutdown completed for [$shardRegion]")
-          context.stop(self)
-          replyTo ! ShutdownCompleted
+      context.become { case Terminated(`shardRegion`) =>
+        log.info(s"Graceful shutdown completed for [$shardRegion]")
+        context.stop(self)
+        replyTo ! ShutdownCompleted
       }
 
   }
