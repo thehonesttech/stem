@@ -143,8 +143,8 @@ object TestStemRuntime {
   def stemtityWithProbe[Key: Tag, Algebra: Tag, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject]
-  )(
-    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  )(implicit
+    protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZLayer[Has[MemoryEventJournal[Key, Event]] with Has[Snapshotting[Key, State]], Throwable, TestStemtity[Key, Algebra, State, Event, Reject]] =
     StemApp
       .clientEmptyCombinator[State, Event, Reject] and StemtityProbe.live[Key, State, Event](eventSourcedBehaviour.eventHandler) and ZLayer
@@ -173,8 +173,8 @@ object TestStemRuntime {
     eventSourcedBehaviour: EventSourcedBehaviour[Algebra, State, Event, Reject],
     readSidePollingInterval: duration.Duration = 100.millis,
     snapshotInterval: Int = 2
-  )(
-    implicit protocol: StemProtocol[Algebra, State, Event, Reject]
+  )(implicit
+    protocol: StemProtocol[Algebra, State, Event, Reject]
   ): ZLayer[Clock, Throwable, Has[MemoryEventJournal[Key, Event]] with Has[Snapshotting[Key, State]] with TestStemtity[
     Key,
     Algebra,
@@ -183,8 +183,8 @@ object TestStemRuntime {
     Reject
   ] with Has[CommittableJournalQuery[Long, Key, Event]]] = {
     val memoryEventJournalLayer: ZLayer[Clock, Nothing, Has[MemoryEventJournal[Key, Event]]] = Clock.any to memoryJournalStoreLayer[Key, Event](
-        readSidePollingInterval
-      )
+      readSidePollingInterval
+    )
     val snapshotting = snapshotStoreLayer[Key, State](snapshotInterval)
     val memoryAndSnapshotting = memoryEventJournalLayer ++ snapshotting
     val stemtityAndProbe =
@@ -215,7 +215,7 @@ object TestStemRuntime {
 
     KeyAlgebraSender.keyToAlgebra[Key, Algebra, State, Event, Reject](
       { (key: Key, bytes: BitVector) =>
-        val algebraCombinators: UIO[AlgebraCombinators.Service[State, Event, Reject]] = (for {
+        val algebraCombinators: UIO[AlgebraCombinators.Service[State, Event, Reject]] = for {
           combinatorRetrieved <- combinatorMap.get(key) match {
             case Some(combinator) =>
               combinator
@@ -229,7 +229,7 @@ object TestStemRuntime {
                   } *> uioCombinator
                 }
           }
-        } yield combinatorRetrieved)
+        } yield combinatorRetrieved
 
         protocol
           .server(eventSourcedBehaviour.algebra, errorHandler)

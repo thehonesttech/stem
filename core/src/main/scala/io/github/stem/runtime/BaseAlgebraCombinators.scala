@@ -101,18 +101,18 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
           val foldBehaviour = userBehaviour.init(readStateFromSnapshot)
           eventJournal
             .read(key, offset)
-            .foldWhileM(readStateFromSnapshot -> offset) { case (_, foldedOffset) => foldedOffset == offsetValue } {
-              case ((state, _), entityEvent) =>
-                foldBehaviour
-                  .reduce(state, entityEvent.payload)
-                  .bimap(
-                    {
-                      case Fold.ImpossibleException => ImpossibleTransitionException(state, entityEvent)
-                      case other                    => other
-                    }, { processedState =>
-                      processedState -> entityEvent.sequenceNr
-                    }
-                  )
+            .foldWhileM(readStateFromSnapshot -> offset) { case (_, foldedOffset) => foldedOffset == offsetValue } { case ((state, _), entityEvent) =>
+              foldBehaviour
+                .reduce(state, entityEvent.payload)
+                .bimap(
+                  {
+                    case Fold.ImpossibleException => ImpossibleTransitionException(state, entityEvent)
+                    case other                    => other
+                  },
+                  { processedState =>
+                    processedState -> entityEvent.sequenceNr
+                  }
+                )
             }
             .bimap(errorHandler, _._1)
 

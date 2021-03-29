@@ -21,7 +21,5 @@ jobs:
       uses: scala-steward-org/scala-steward-action@v2
       with:
         github-token: ${{ github.token }}
-    - name: Scala Steward Github Action
-      uses: scala-steward-org/scala-steward-action@v2.10.0
     - name: Run tests
       run: sbt test
