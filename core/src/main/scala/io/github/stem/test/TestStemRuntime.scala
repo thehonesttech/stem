@@ -49,19 +49,22 @@ object TestStemRuntime {
 
     def memory[Id: Tag, Event: Tag, Offset: Tag, Reject: Tag](
       errorHandler: Throwable => Reject
-    ): ZLayer[Has[ReadSideParams[Id, Event, Reject]] with Has[CommittableJournalQuery[Offset, Id, Event]], Nothing, Has[ReadSideProcessor[Reject]] with Has[
+    ): ZLayer[Clock with Has[ReadSideParams[Id, Event, Reject]] with Has[CommittableJournalQuery[Offset, Id, Event]], Nothing, Has[ReadSideProcessor.Service[
+      Reject
+    ]] with Has[
       TestReadSideProcessor[Reject]
     ]] = {
       (for {
         readSideParams          <- ZIO.service[ReadSideParams[Id, Event, Reject]]
+        clock                   <- ZIO.service[Clock.Service]
         committableJournalQuery <- ZIO.service[CommittableJournalQuery[Offset, Id, Event]]
-        stream = {
+        stream: ZStream[Any, Reject, KillSwitch] = {
           StemApp
             .readSideStream[Id, Event, Offset, Reject](readSideParams, errorHandler)
-            .provideSomeLayer[Clock](ReadSideProcessing.memory ++ ZLayer.succeed(committableJournalQuery))
+            .provideLayer(ZLayer.succeed(clock) ++ ReadSideProcessing.memory ++ ZLayer.succeed(committableJournalQuery))
         }
-        el = new ReadSideProcessor[Reject] with TestReadSideProcessor[Reject] {
-          override val readSideStream: ZStream[Clock, Reject, KillSwitch] = stream
+        el = new ReadSideProcessor.Service[Reject] with TestReadSideProcessor[Reject] {
+          override val readSideStream: ZStream[Any, Reject, KillSwitch] = stream
 
           override def triggerReadSideProcessing(triggerTimes: Int): URIO[TestClock, Unit] = TestClock.adjust((triggerTimes * 100).millis)
 
@@ -75,7 +78,7 @@ object TestStemRuntime {
               _     <- fiber.join
             } yield ()
         }
-      } yield Has.allOf[ReadSideProcessor[Reject], TestReadSideProcessor[Reject]](el, el)).toLayerMany
+      } yield Has.allOf[ReadSideProcessor.Service[Reject], TestReadSideProcessor[Reject]](el, el)).toLayerMany
 
     }
 

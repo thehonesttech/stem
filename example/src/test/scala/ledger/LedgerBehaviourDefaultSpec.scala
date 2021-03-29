@@ -8,7 +8,7 @@ import io.github.stem.runtime.akka.EventSourcedBehaviour
 import io.github.stem.test.StemtityProbe
 import io.github.stem.test.TestStemRuntime.TestReadSideProcessor.TestReadSideProcessor
 import io.github.stem.test.TestStemRuntime._
-import ledger.LedgerGrpcService.Accounts
+import ledger.LedgerServer.Accounts
 import ledger.LedgerTest._
 import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
@@ -132,7 +132,8 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
 
   private val kafka = TestKafkaMessageConsumer
     .memory[LedgerId, LedgerInstructionsMessage, String]
-
+  private val testReadSideProcessor = TestReadSideProcessor
+    .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler)
   private val env
     : ZLayer[TestEnvironment, Throwable, TestTransactions with TestAccounts with Has[ZLedger[Any, Any]] with Has[TestReadSideProcessor[String]] with TestKafkaConsumer] =
     ZLayer
@@ -144,8 +145,7 @@ object LedgerBehaviourDefaultSpec extends DefaultRunnableSpec {
         ProcessReadSide.live,
         LedgerGrpcService.live,
         TransactionReadSideProcessor.readsideParams.toLayer,
-        TestReadSideProcessor
-          .memory[TransactionId, TransactionEvent, Long, String](errorHandler = errorHandler),
+        testReadSideProcessor,
         LedgerInboundMessageHandling.liveHandler,
         ReadSideProcessing.memory,
         kafka

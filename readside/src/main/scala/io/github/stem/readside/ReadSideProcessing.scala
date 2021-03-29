@@ -6,7 +6,6 @@ import akka.pattern.{ask, BackoffOpts, BackoffSupervisor}
 import akka.util.Timeout
 import io.github.stem.readside.ReadSideProcessing.{KillSwitch, _}
 import io.github.stem.readside.ReadSideWorkerActor.KeepRunning
-import zio.clock.Clock
 import zio.stream.ZStream
 import zio.{Has, Task, UIO, ULayer, ZIO, ZLayer}
 
@@ -14,8 +13,13 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.{FiniteDuration, _}
 
-trait ReadSideProcessor[Reject] {
-  def readSideStream: ZStream[Clock, Reject, KillSwitch]
+object ReadSideProcessor {
+  type ReadSideProcessor[Reject] = Has[ReadSideProcessor.Service[Reject]]
+
+  trait Service[Reject] {
+    def readSideStream: ZStream[Any, Reject, KillSwitch]
+  }
+
 }
 
 final class ActorReadSideProcessing private (system: ActorSystem, settings: ReadSideSettings) extends ReadSideProcessing.Service {

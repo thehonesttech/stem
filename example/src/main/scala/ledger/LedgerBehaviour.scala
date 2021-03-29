@@ -12,8 +12,8 @@ import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.readside.ReadSideProcessing.ReadSideProcessing
 import io.github.stem.runtime.readside.CommittableJournalQuery
 import io.grpc.Status
-import ledger.LedgerGrpcService.{Accounts, Transactions}
-import ledger.LedgerServer.emptyCombinators
+import ledger.LedgerServer.{emptyCombinators, AccountCombinator, Accounts, AllCombinators, TransactionCombinator, Transactions}
+import ledger.ProcessReadSide.ProcessReadSide
 import ledger.communication.grpc.ZioService.ZLedger
 import ledger.communication.grpc._
 import ledger.eventsourcing.events._
@@ -37,6 +37,12 @@ case class Denied(reason: String) extends LockResponse
 object LedgerServer extends ServerMain {
 
   type LedgerCombinator = AlgebraCombinators.Service[Int, AccountEvent, String]
+
+  type Accounts = AccountId => AccountCommandHandler
+  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
+  type TransactionCombinator = Combinators[TransactionState, TransactionEvent, String]
+  type AllCombinators = AccountCombinator with TransactionCombinator
+  type Transactions = TransactionId => TransactionCommandHandler
   val readSidePollingInterval: Duration = 100.millis
 
   private val messageHandling = LedgerInboundMessageHandling.messageHandling
@@ -56,8 +62,7 @@ object LedgerServer extends ServerMain {
   private val accountStores = StemApp.liveRuntime[AccountId, AccountEvent]
   private val transactionStores = StemApp.liveRuntime[TransactionId, TransactionEvent]
 
-  val emptyCombinators
-    : ZLayer[Any, Nothing, Combinators[AccountState, AccountEvent, String] with Combinators[TransactionState, TransactionEvent, String]] = clientEmptyCombinator[
+  val emptyCombinators: ZLayer[Any, Nothing, AllCombinators] = clientEmptyCombinator[
       AccountState,
       AccountEvent,
       String
@@ -83,61 +88,73 @@ object LedgerServer extends ServerMain {
   override def services: ServiceList[zio.ZEnv] = ServiceList.addManaged(buildSystem.build.map(_.get))
 }
 
-class ProcessReadSide(accounts: Accounts, transactions: Transactions) {
-
-  def process(transactionId: TransactionId, transactionEvent: TransactionEvent): IO[String, Unit] = {
-    transactionEvent match {
-      case TransactionCreated(from, to, amount) =>
-        accounts(from)
-          .debit(AccountTransactionId(transactionId.value), amount)
-          .foldM(failReason => transactions(transactionId).fail(failReason), _ => transactions(transactionId).authorise)
-          .provideLayer(LedgerServer.emptyCombinators)
-      case TransactionAuthorized() =>
-        (for {
-          txn <- transactions(transactionId).getInfo
-          creditResult <- accounts(txn.toAccountId)
-            .credit(
-              AccountTransactionId(transactionId.value),
-              txn.amount
-            )
-            .foldM(
-              { rejection =>
-                // TODO better revert
-                accounts(txn.fromAccountId).debit(
-                  AccountTransactionId(transactionId.value),
-                  txn.amount
-                ) *> transactions(transactionId).fail(rejection)
-              }, { _ =>
-                transactions(transactionId).succeed
-              }
-            )
-        } yield creditResult)
-          .provideLayer(LedgerServer.emptyCombinators)
-      case _ => IO.fail("Unexpected message")
-    }
-  }
-}
-
 object ProcessReadSide {
-  val live = ZLayer.fromServices[Accounts, Transactions, ProcessReadSide] { (accounts: Accounts, transactions: Transactions) =>
-    new ProcessReadSide(accounts, transactions)
+  type ProcessReadSide = Has[ProcessReadSide.Service]
+
+  trait Service {
+    def process(transactionId: TransactionId, transactionEvent: TransactionEvent): IO[String, Unit]
   }
+
+  def process(transactionId: TransactionId, transactionEvent: TransactionEvent): ZIO[ProcessReadSide, String, Unit] =
+    ZIO.accessM[ProcessReadSide](_.get.process(transactionId, transactionEvent))
+
+  class AccountAndTransactionProcessReadSide(accounts: Accounts, transactions: Transactions, combinators: AllCombinators) extends ProcessReadSide.Service {
+
+    def process(
+      transactionId: TransactionId,
+      transactionEvent: TransactionEvent
+    ): IO[String, Unit] = {
+      transactionEvent match {
+        case TransactionCreated(from, to, amount) =>
+          accounts(from)
+            .debit(AccountTransactionId(transactionId.value), amount)
+            .foldM(failReason => transactions(transactionId).fail(failReason), _ => transactions(transactionId).authorise)
+        case TransactionAuthorized() =>
+          (for {
+            txn <- transactions(transactionId).getInfo
+            creditResult <- accounts(txn.toAccountId)
+              .credit(
+                AccountTransactionId(transactionId.value),
+                txn.amount
+              )
+              .foldM(
+                { rejection =>
+                  // TODO better revert
+                  accounts(txn.fromAccountId).debit(
+                    AccountTransactionId(transactionId.value),
+                    txn.amount
+                  ) *> transactions(transactionId).fail(rejection)
+                }, { _ =>
+                  transactions(transactionId).succeed
+                }
+              )
+          } yield creditResult)
+        case _ => IO.fail("Unexpected message")
+      }
+    }.provide(combinators)
+  }
+
+  val live: ZLayer[AllCombinators with Has[Transactions] with Has[Accounts], Nothing, ProcessReadSide] =
+    (for {
+      accounts       <- ZIO.service[Accounts]
+      transactions   <- ZIO.service[Transactions]
+      allCombinators <- ZIO.environment[AllCombinators]
+    } yield new AccountAndTransactionProcessReadSide(accounts, transactions, allCombinators)).toLayer
 }
 
 object TransactionReadSideProcessor {
 
   implicit val runtime: Runtime[ZEnv] = LedgerServer
 
-  val readsideParams: ZIO[Has[ProcessReadSide], Nothing, ReadSideParams[TransactionId, TransactionEvent, String]] =
-    ZIO.access[Has[ProcessReadSide]] { layer =>
-      ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ProcessReadSide].process)
+  val readsideParams: ZIO[ProcessReadSide, Nothing, ReadSideParams[TransactionId, TransactionEvent, String]] =
+    ZIO.access[ProcessReadSide] { layer =>
+      ReadSideParams("TransactionReadSide", ConsumerId("transactionProcessing"), TransactionEntity.tagging, 30, layer.get[ProcessReadSide.Service].process)
     }
 
-  val live: ZLayer[Console with Clock with ReadSideProcessing with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with Has[
-    ProcessReadSide
-  ], String, Has[
-    ReadSideProcessing.KillSwitch
-  ]] = {
+  val live
+    : ZLayer[Console with Clock with ReadSideProcessing with Has[CommittableJournalQuery[Long, TransactionId, TransactionEvent]] with ProcessReadSide, String, Has[
+      ReadSideProcessing.KillSwitch
+    ]] = {
     ZLayer.fromAcquireRelease(for {
       readSideParams <- readsideParams
       _              <- ZIO.service[Console.Service]
@@ -182,10 +199,7 @@ object LedgerInboundMessageHandling {
 }
 
 object LedgerGrpcService {
-  type Accounts = AccountId => AccountCommandHandler
-  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
-  type TransactionCombinator = Combinators[TransactionState, TransactionEvent, String]
-  type Transactions = TransactionId => TransactionCommandHandler
+
   type Requirements = AccountCombinator with TransactionCombinator with Has[Accounts] with Has[Transactions]
 
   val live: ZLayer[ZEnv with Requirements, Nothing, Has[ZLedger[Any, Any]]] =
