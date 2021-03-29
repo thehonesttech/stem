@@ -23,4 +23,3 @@ object Tagging {
     Partitioned(numberOfPartitions, tag)
 
 }
-

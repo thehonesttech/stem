@@ -20,12 +20,12 @@ object AccountEntity {
 
     @MethodId(1)
     def open: SIO[Unit] = read[AccountState, AccountEvent, String]
-        .flatMap {
-          case EmptyAccount() =>
-            append(AccountOpened())
-          case _ =>
-            ignore
-        }
+      .flatMap {
+        case EmptyAccount() =>
+          append(AccountOpened())
+        case _ =>
+          ignore
+      }
 
     @MethodId(2)
     def credit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] =
@@ -42,19 +42,19 @@ object AccountEntity {
 
     @MethodId(3)
     def debit(transactionId: AccountTransactionId, amount: BigDecimal): SIO[Unit] = read[AccountState, AccountEvent, String].flatMap {
-        case account: ActiveAccount =>
-          if (account.processedTransactions(transactionId.value)) {
-            ignore
-          } else {
-            if (account.balance > amount)
-              append(AccountDebited(transactionId.value, amount))
-            else
-              reject("Insufficient funds")
-          }
-        case _ =>
-          reject("Account does not exist")
-      }
+      case account: ActiveAccount =>
+        if (account.processedTransactions(transactionId.value)) {
+          ignore
+        } else {
+          if (account.balance > amount)
+            append(AccountDebited(transactionId.value, amount))
+          else
+            reject("Insufficient funds")
+        }
+      case _ =>
+        reject("Account does not exist")
     }
+  }
 
   val errorHandler: Throwable => String = _.getMessage
 

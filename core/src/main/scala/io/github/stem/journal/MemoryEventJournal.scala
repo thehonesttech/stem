@@ -33,8 +33,8 @@ class MemoryEventJournal[Key, Event](
         }
         .view
         .mapValues { chunk =>
-          chunk.map {
-            case (_, offset, event, tags) => (offset, event, tags)
+          chunk.map { case (_, offset, event, tags) =>
+            (offset, event, tags)
           }
         }
         .toMap
@@ -45,16 +45,16 @@ class MemoryEventJournal[Key, Event](
     ZIO.accessM { tagging =>
       internalStateEvents.update { internalEvents =>
         val tags = tagging.tag(key).map(_.value).toList
-        internalEvents ++ events.zipWithIndex.map {
-          case (event, index) => (key, index + offset, event, tags)
+        internalEvents ++ events.zipWithIndex.map { case (event, index) =>
+          (key, index + offset, event, tags)
         }
       } *> internalQueue.offerAll(events.map(ev => key -> ev)).unit
     }
 
   override def read(key: Key, offset: Long): stream.Stream[Nothing, EntityEvent[Key, Event]] = {
     val a: UIO[List[EntityEvent[Key, Event]]] = internal
-      .map(_.getOrElse(key, Chunk.empty).toList.drop(offset.toInt).map {
-        case (index, event, _) => EntityEvent(key, index, event)
+      .map(_.getOrElse(key, Chunk.empty).toList.drop(offset.toInt).map { case (index, event, _) =>
+        EntityEvent(key, index, event)
       })
       .get
     stream.Stream.fromIterableM(a)
@@ -75,11 +75,10 @@ class MemoryEventJournal[Key, Event](
   override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
     val a: ZIO[Any, Nothing, List[JournalEntry[Long, Key, Event]]] = internal.get.map { state =>
       state
-        .flatMap {
-          case (key, chunk) =>
-            chunk.map {
-              case (offset, event, tags) => (key, offset, event, tags)
-            }
+        .flatMap { case (key, chunk) =>
+          chunk.map { case (offset, event, tags) =>
+            (key, offset, event, tags)
+          }
         }
         .toList
         .sortBy(_._2)
