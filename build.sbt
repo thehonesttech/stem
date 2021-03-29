@@ -132,9 +132,9 @@ val testDeps = Seq(
 )
 
 val allDeps = Seq(
-  "org.apache.kafka" % "kafka-clients" % "2.1.1",
-  "com.typesafe.akka" %% "akka-cluster-sharding" % "2.6.13",
-  "com.typesafe.akka" %% "akka-cluster" % "2.6.13",
+  "org.apache.kafka" % "kafka-clients" % "2.7.0",
+  "com.typesafe.akka" %% "akka-cluster-sharding" % "2.5.32",
+  "com.typesafe.akka" %% "akka-cluster" % "2.5.32",
   "dev.zio" %% "zio-streams" % "1.0.5",
   "dev.zio" %% "zio-kafka" % "0.14.0",
   "io.suzaku" %% "boopickle" % "1.3.3",
