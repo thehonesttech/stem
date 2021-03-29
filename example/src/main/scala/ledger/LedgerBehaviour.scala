@@ -62,7 +62,7 @@ object LedgerServer extends ServerMain {
   private val accountStores = StemApp.liveRuntime[AccountId, AccountEvent]
   private val transactionStores = StemApp.liveRuntime[TransactionId, TransactionEvent]
 
-  val emptyCombinators: ZLayer[Any, Nothing, AllCombinators] = clientEmptyCombinator[
+  private val emptyCombinators: ZLayer[Any, Nothing, AllCombinators] = clientEmptyCombinator[
       AccountState,
       AccountEvent,
       String
@@ -169,25 +169,27 @@ object LedgerInboundMessageHandling {
   type ConsumerConfiguration = KafkaConsumerConfig[LedgerId, LedgerInstructionsMessage]
   type LedgerMessageConsumer = MessageConsumer[LedgerId, LedgerInstructionsMessage, String]
 
-  val messageHandling: ZIO[Has[Accounts] with Has[Transactions], Throwable, (LedgerId, LedgerInstructionsMessage) => IO[String, Unit]] =
-    ZIO.access { layer =>
-      val accounts = layer.get[Accounts]
-      val transactions = layer.get[Transactions]
-      (_: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
-        instructionMessage match {
-          case OpenAccountMessage(accountId) =>
-            accounts(accountId).open
-              .provideLayer(emptyCombinators)
-          case AuthorizePaymentMessage(transactionId, from, to, amount) =>
-            transactions(transactionId)
-              .create(from, to, amount)
-              .provideLayer(emptyCombinators)
-          case _ => ZIO.unit
+  val messageHandling: ZIO[AllCombinators with Has[Accounts] with Has[Transactions], Throwable, (LedgerId, LedgerInstructionsMessage) => IO[String, Unit]] = {
+    ZIO.environment[AllCombinators].flatMap { allCombinators =>
+      ZIO.access { layer =>
+        val accounts = layer.get[Accounts]
+        val transactions = layer.get[Transactions]
+        (_: LedgerId, instructionMessage: LedgerInstructionsMessage) => {
+          instructionMessage match {
+            case OpenAccountMessage(accountId) =>
+              accounts(accountId).open.provide(allCombinators)
+            case AuthorizePaymentMessage(transactionId, from, to, amount) =>
+              transactions(transactionId)
+                .create(from, to, amount)
+                .provide(allCombinators)
+            case _ => ZIO.unit
+          }
         }
       }
     }
+  }
 
-  val liveHandler: ZLayer[Has[Accounts] with Has[Transactions], Throwable, Has[(LedgerId, LedgerInstructionsMessage) => IO[String, Unit]]] =
+  val liveHandler: ZLayer[AllCombinators with Has[Accounts] with Has[Transactions], Throwable, Has[(LedgerId, LedgerInstructionsMessage) => IO[String, Unit]]] =
     messageHandling.toLayer
 
   val live: ZLayer[Console with MessageConsumerSubscriber, Nothing, Has[SubscriptionKillSwitch]] =
