@@ -8,7 +8,7 @@ Stem is an opinionated Event sourcing/CQRS framework that allows you to adopt a 
 The framework uses **ZIO** library at its core for both streams and effects management.
 This allows deterministic and quick tests.
  
-This project is heavily inspired by **Lagom** and **Aecor**.
+This project is inspired by **Lagom** and **Aecor**.
 It is in its early days so it is not ready for production use yet.
 
 The **example** project contains code and test of a possible implementation of a basic ledger.
