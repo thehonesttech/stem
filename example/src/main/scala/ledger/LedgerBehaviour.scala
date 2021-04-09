@@ -200,7 +200,7 @@ object LedgerInboundMessageHandling {
 
 object LedgerGrpcService {
 
-  type Requirements = AccountCombinator with TransactionCombinator with Has[Accounts] with Has[Transactions]
+  type Requirements = AllCombinators with Has[Accounts] with Has[Transactions]
 
   val live: ZLayer[ZEnv with Requirements, Nothing, Has[ZLedger[Any, Any]]] =
     new ZioService.ZLedger[ZEnv with Requirements, Any] {
