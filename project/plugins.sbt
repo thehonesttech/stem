@@ -7,5 +7,5 @@ addSbtPlugin("org.xerial.sbt" % "sbt-sonatype" % "3.9.7")
 //addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.9.26")
 
 val zioGrpcVersion = "0.5.0"
-libraryDependencies ++= Seq("com.thesamet.scalapb" %% "compilerplugin" % "0.10.11",
+libraryDependencies ++= Seq("com.thesamet.scalapb" %% "compilerplugin" % "0.11.1",
 "com.thesamet.scalapb.zio-grpc" %% "zio-grpc-codegen" % zioGrpcVersion)
