@@ -4,9 +4,8 @@ import accounts.AccountEntity.{errorHandler, AccountCombinator, AccountCommandHa
 import accounts.{AccountEntity, AccountId, AccountTransactionId}
 import io.github.stem.StemApp
 import io.github.stem.StemApp.{clientEmptyCombinator, ReadSideParams}
-import io.github.stem.communication.kafka.MessageConsumerSubscriber.MessageConsumerSubscriber
+import io.github.stem.communication.kafka.MessageConsumerSubscriber
 import io.github.stem.communication.kafka._
-import io.github.stem.data.AlgebraCombinators.Combinators
 import io.github.stem.data._
 import io.github.stem.readside.ReadSideProcessing
 import io.github.stem.readside.ReadSideProcessing.ReadSideProcessing
@@ -190,7 +189,7 @@ object LedgerInboundMessageHandling {
   val liveHandler: ZLayer[AllCombinators with Has[Accounts] with Has[Transactions], Throwable, Has[(LedgerId, LedgerInstructionsMessage) => IO[String, Unit]]] =
     messageHandling.toLayer
 
-  val live: ZLayer[Console with MessageConsumerSubscriber, Nothing, Has[SubscriptionKillSwitch]] =
+  val live: ZLayer[Console with Has[MessageConsumerSubscriber], Nothing, Has[SubscriptionKillSwitch]] =
     ZLayer.fromManaged(
       Managed.make(
         MessageConsumerSubscriber.consumeForever

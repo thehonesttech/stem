@@ -40,20 +40,18 @@ class KafkaMessageConsumer[K: Tag, V: Tag, Reject: Tag](
   }
 }
 
+trait MessageConsumerSubscriber {
+  def consumeForever: UIO[SubscriptionKillSwitch]
+}
+
 object MessageConsumerSubscriber {
 
-  type MessageConsumerSubscriber = Has[MessageConsumerSubscriber.Service]
-
-  trait Service {
-    def consumeForever: UIO[SubscriptionKillSwitch]
-  }
-
-  def consumeForever: ZIO[MessageConsumerSubscriber, Nothing, SubscriptionKillSwitch] = ZIO.accessM[MessageConsumerSubscriber](_.get.consumeForever)
+  def consumeForever: ZIO[Has[MessageConsumerSubscriber], Nothing, SubscriptionKillSwitch] = ZIO.accessM[Has[MessageConsumerSubscriber]](_.get.consumeForever)
 
   val live =
-    ZLayer.fromServices[ZStream[Clock with Blocking, String, Unit], Clock.Service, Console.Service, Blocking.Service, Service] {
+    ZLayer.fromServices[ZStream[Clock with Blocking, String, Unit], Clock.Service, Console.Service, Blocking.Service, MessageConsumerSubscriber] {
       (messageStream, clock, console, blocking) =>
-        new Service {
+        new MessageConsumerSubscriber {
           private val scheduleEvery5Seconds = Schedule
             .spaced(5.seconds)
             .onDecision({
