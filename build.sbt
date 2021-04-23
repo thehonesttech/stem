@@ -136,7 +136,7 @@ val allDeps = Seq(
   "dev.zio" %% "zio-kafka" % "0.14.0",
   "io.suzaku" %% "boopickle" % "1.3.3",
   "com.vladkopanev" %% "zio-saga-core" % "0.4.0",
-  "org.scodec" %% "scodec-bits" % "1.1.25",
+  "org.scodec" %% "scodec-bits" % "1.1.26",
   "org.scodec" %% "scodec-core" % "1.11.7",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
   "com.thesamet.scalapb.common-protos" %% "proto-google-common-protos-scalapb_0.10" % "1.18.1-1" % "protobuf",
