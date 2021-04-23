@@ -2,12 +2,11 @@ package io.github.stem.runtime.akka
 
 import akka.actor.{Actor, ActorLogging, Props, ReceiveTimeout, Stash, Status}
 import akka.cluster.sharding.ShardRegion
-import io.github.stem.data.AlgebraCombinators.Combinators
-import io.github.stem.data.{Invocation, StemProtocol}
+import io.github.stem.data.{Combinators, Invocation, StemProtocol}
 import io.github.stem.runtime.{AlgebraCombinatorConfig, Fold, KeyedAlgebraCombinators}
 import izumi.reflect.Tag
 import scodec.bits.BitVector
-import zio.{Runtime, ULayer}
+import zio.{Has, Runtime, ULayer}
 
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -39,7 +38,7 @@ private class StemActor[Key: KeyDecoder: Tag, Algebra, State: Tag, Event: Tag, R
       throw new IllegalArgumentException(error)
     }
 
-  private val algebraCombinatorsWithKeyResolved: ULayer[Combinators[State, Event, Reject]] =
+  private val algebraCombinatorsWithKeyResolved: ULayer[Has[Combinators[State, Event, Reject]]] =
     KeyedAlgebraCombinators
       .fromParams[Key, State, Event, Reject](key, eventSourcedBehaviour.eventHandler, eventSourcedBehaviour.errorHandler, algebraCombinatorConfig)
       .toLayer

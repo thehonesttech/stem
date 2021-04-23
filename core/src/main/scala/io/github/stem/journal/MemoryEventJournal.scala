@@ -1,6 +1,7 @@
 package io.github.stem.journal
 
 import io.github.stem.data.{EntityEvent, EventTag}
+import io.github.stem.journal.MemoryEventJournal.Offset
 import io.github.stem.runtime.readside.JournalQuery
 import zio._
 import zio.clock.Clock
@@ -9,11 +10,11 @@ import zio.stream.ZStream
 
 class MemoryEventJournal[Key, Event](
   pollingInterval: Duration,
-  internalStateEvents: Ref[Chunk[(Key, Long, Event, List[String])]],
+  internalStateEvents: Ref[Chunk[(Key, Offset, Event, List[String])]],
   internalQueue: Queue[(Key, Event)],
   clock: Clock.Service
 ) extends EventJournal[Key, Event]
-    with JournalQuery[Long, Key, Event] {
+    with JournalQuery[Offset, Key, Event] {
 
   def getAppendedEvent(key: Key): Task[List[Event]] = internalStateEvents.get.map { list =>
     list.collect {
@@ -41,7 +42,7 @@ class MemoryEventJournal[Key, Event](
     }
   }
 
-  override def append(key: Key, offset: Long, events: NonEmptyChunk[Event]): RIO[HasTagging, Unit] =
+  override def append(key: Key, offset: Offset, events: NonEmptyChunk[Event]): RIO[HasTagging, Unit] =
     ZIO.accessM { tagging =>
       internalStateEvents.update { internalEvents =>
         val tags = tagging.tag(key).map(_.value).toList
@@ -51,7 +52,7 @@ class MemoryEventJournal[Key, Event](
       } *> internalQueue.offerAll(events.map(ev => key -> ev)).unit
     }
 
-  override def read(key: Key, offset: Long): stream.Stream[Nothing, EntityEvent[Key, Event]] = {
+  override def read(key: Key, offset: Offset): stream.Stream[Nothing, EntityEvent[Key, Event]] = {
     val a: UIO[List[EntityEvent[Key, Event]]] = internal
       .map(_.getOrElse(key, Chunk.empty).toList.drop(offset.toInt).map { case (index, event, _) =>
         EntityEvent(key, index, event)
@@ -60,9 +61,9 @@ class MemoryEventJournal[Key, Event](
     stream.Stream.fromIterableM(a)
   }
 
-  override def eventsByTag(tag: EventTag, offset: Option[Long]): ZStream[Any, Throwable, JournalEntry[Long, Key, Event]] = {
+  override def eventsByTag(tag: EventTag, offset: Option[Offset]): ZStream[Any, Throwable, JournalEntry[Offset, Key, Event]] = {
     (for {
-      lastOffsetProcessed <- ZStream.fromEffect(Ref.make[Option[Long]](None))
+      lastOffsetProcessed <- ZStream.fromEffect(Ref.make[Option[Offset]](None))
       _                   <- ZStream.fromSchedule(Schedule.fixed(pollingInterval))
       lastOffset <- ZStream
         .fromEffect(lastOffsetProcessed.get)
@@ -72,8 +73,8 @@ class MemoryEventJournal[Key, Event](
     } yield journalEntry).provideLayer(ZLayer.succeed(clock))
   }
 
-  override def currentEventsByTag(tag: EventTag, offset: Option[Long]): stream.Stream[Throwable, JournalEntry[Long, Key, Event]] = {
-    val a: ZIO[Any, Nothing, List[JournalEntry[Long, Key, Event]]] = internal.get.map { state =>
+  override def currentEventsByTag(tag: EventTag, offset: Option[Offset]): stream.Stream[Throwable, JournalEntry[Offset, Key, Event]] = {
+    val a: ZIO[Any, Nothing, List[JournalEntry[Offset, Key, Event]]] = internal.get.map { state =>
       state
         .flatMap { case (key, chunk) =>
           chunk.map { case (offset, event, tags) =>
@@ -93,6 +94,8 @@ class MemoryEventJournal[Key, Event](
 }
 
 object MemoryEventJournal {
+  type Offset = Long
+
   def make[Key, Event](pollingInterval: Duration): ZIO[Clock, Nothing, MemoryEventJournal[Key, Event]] = {
     for {
       internal <- Ref.make(Chunk[(Key, Long, Event, List[String])]())

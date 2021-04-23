@@ -4,7 +4,6 @@ import scodec.bits.BitVector
 import io.github.stem.StemApp
 import io.github.stem.StemApp.ReadSideParams
 import io.github.stem.communication.kafka.MessageConsumer
-import io.github.stem.data.AlgebraCombinators.{Combinators, Service}
 import io.github.stem.data._
 import io.github.stem.journal.MemoryEventJournal
 import io.github.stem.readside.{ReadSideProcessing, ReadSideProcessor}
@@ -138,7 +137,7 @@ object TestStemRuntime {
   }
 
   type TestStemtity[Key, Algebra, State, Event, Reject] =
-    Has[Key => Algebra] with StemtityProbe[Key, State, Event] with Has[AlgebraCombinators.Service[State, Event, Reject]]
+    Has[Key => Algebra] with StemtityProbe[Key, State, Event] with Has[Combinators[State, Event, Reject]]
 
   def stemtityWithProbe[Key: Tag, Algebra: Tag, State: Tag, Event: Tag, Reject: Tag](
     tagging: Tagging[Key],
@@ -163,7 +162,7 @@ object TestStemRuntime {
       } yield buildTestStemtity(eventSourcedBehaviour, baseAlgebraConfig)
       (for {
         builtStem  <- stem
-        combinator <- ZIO.service[AlgebraCombinators.Service[State, Event, Reject]]
+        combinator <- ZIO.service[Combinators[State, Event, Reject]]
         probe      <- ZIO.service[StemtityProbe.Service[Key, State, Event]]
       } yield Has.allOf(builtStem, probe, combinator)).toLayerMany
     }
@@ -210,12 +209,12 @@ object TestStemRuntime {
     algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event] //default combinator that tracks events and states
   )(implicit protocol: StemProtocol[Algebra, State, Event, Reject]): Key => Algebra = {
     val errorHandler: Throwable => Reject = eventSourcedBehaviour.errorHandler
-    var combinatorMap: Map[Key, UIO[AlgebraCombinators.Service[State, Event, Reject]]] =
-      Map[Key, UIO[AlgebraCombinators.Service[State, Event, Reject]]]()
+    var combinatorMap: Map[Key, UIO[Combinators[State, Event, Reject]]] =
+      Map[Key, UIO[Combinators[State, Event, Reject]]]()
 
     KeyAlgebraSender.keyToAlgebra[Key, Algebra, State, Event, Reject](
       { (key: Key, bytes: BitVector) =>
-        val algebraCombinators: UIO[AlgebraCombinators.Service[State, Event, Reject]] = for {
+        val algebraCombinators: UIO[Combinators[State, Event, Reject]] = for {
           combinatorRetrieved <- combinatorMap.get(key) match {
             case Some(combinator) =>
               combinator
@@ -308,12 +307,15 @@ object ZIOOps {
     }
   }
 
-  def testLayer[State: Tag, Event: Tag, Reject: Tag]: ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Combinators[State, Event, Reject]] =
+  def testLayer[State: Tag, Event: Tag, Reject: Tag]
+    : ZLayer[Any, Nothing, _root_.zio.test.environment.TestEnvironment with Has[Combinators[State, Event, Reject]]] =
     zio.test.environment.testEnvironment ++ StemApp.clientEmptyCombinator[State, Event, Reject]
 
   implicit class RichUnsafeZIO[R, Rej: Tag, Result](returnType: ZIO[R, Rej, Result]) {
-    def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Combinators[State, Event, Reject]): Result = {
-      runtime.unsafeRun(returnType.asInstanceOf[ZIO[ZEnv with Combinators[State, Event, Reject], Reject, Result]].provideLayer(testLayer[State, Event, Reject]))
+    def runSync[State: Tag, Event: Tag, Reject: Tag](implicit runtime: Runtime[ZEnv], ev1: R <:< Has[Combinators[State, Event, Reject]]): Result = {
+      runtime.unsafeRun(
+        returnType.asInstanceOf[ZIO[ZEnv with Has[Combinators[State, Event, Reject]], Reject, Result]].provideLayer(testLayer[State, Event, Reject])
+      )
     }
   }
 

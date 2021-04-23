@@ -2,8 +2,7 @@ package io.github.stem
 
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
-import io.github.stem.data.AlgebraCombinators.Combinators
-import io.github.stem.data.{AlgebraCombinators, Committable, ConsumerId, Tagging}
+import io.github.stem.data.{AlgebraCombinators, Combinators, Committable, ConsumerId, Tagging}
 import io.github.stem.journal.{EventJournal, JournalEntry}
 import io.github.stem.readside.ReadSideProcessing.{KillSwitch, Process, ReadSideProcessing, RunningProcess}
 import io.github.stem.readside.{ReadSideProcessing, ReadSideSettings}
@@ -17,9 +16,9 @@ import zio.{duration, Has, IO, Managed, Queue, Runtime, Schedule, Tag, Task, ULa
 
 object StemApp {
 
-  type SIO[State, Event, Reject, Result] = ZIO[Combinators[State, Event, Reject], Reject, Result]
+  type SIO[State, Event, Reject, Result] = ZIO[Has[Combinators[State, Event, Reject]], Reject, Result]
 
-  def liveAlgebra[Reject]: AlgebraCombinators.Service[Nothing, Any, Reject] = new AlgebraCombinators.Service[Nothing, Any, Reject] {
+  def liveAlgebra[Reject]: Combinators[Nothing, Any, Reject] = new Combinators[Nothing, Any, Reject] {
     override def read: IO[Reject, Nothing] = throw new RuntimeException("This is a stub")
 
     override def append(es: Any, other: Any*): IO[Reject, Unit] = throw new RuntimeException("This is a stub")
@@ -27,7 +26,7 @@ object StemApp {
     override def reject[A](r: Reject): IO[Reject, A] = throw new RuntimeException("This is a stub")
   }
 
-  def clientEmptyCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Combinators[State, Event, Reject]] =
+  def clientEmptyCombinator[State: Tag, Event: Tag, Reject: Tag]: ULayer[Has[Combinators[State, Event, Reject]]] =
     ZLayer.succeed(liveAlgebra[Reject])
 
   def actorSystemLayer(name: String, confFileName: String = "stem.conf") =
@@ -122,13 +121,13 @@ object StemApp {
   object Ops {
 
     implicit class StubbableSio[-R, State: Tag, Event: Tag, Reject: Tag, Result](
-      returnType: ZIO[Combinators[State, Event, Reject], Reject, Result]
+      returnType: ZIO[Has[Combinators[State, Event, Reject]], Reject, Result]
     ) {
       def provideCombinator: ZIO[Any, Reject, Result] = {
         returnType.provideLayer(clientEmptyCombinator[State, Event, Reject])
       }
 
-      def provideSomeCombinator[R0 <: Has[_]](implicit ev: R0 with Combinators[State, Event, Reject] <:< R) =
+      def provideSomeCombinator[R0 <: Has[_]](implicit ev: R0 with Has[Combinators[State, Event, Reject]] <:< R) =
         returnType.provideSomeLayer[R0](clientEmptyCombinator[State, Event, Reject])
     }
 

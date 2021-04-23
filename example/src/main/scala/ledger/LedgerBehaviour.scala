@@ -35,7 +35,7 @@ case class Denied(reason: String) extends LockResponse
 
 object LedgerServer extends ServerMain {
 
-  type LedgerCombinator = AlgebraCombinators.Service[Int, AccountEvent, String]
+  type LedgerCombinator = Combinators[Int, AccountEvent, String]
   type AllCombinators = AccountCombinator with TransactionCombinator
 
   val readSidePollingInterval: Duration = 100.millis

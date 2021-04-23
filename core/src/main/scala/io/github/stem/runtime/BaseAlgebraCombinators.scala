@@ -2,7 +2,7 @@ package io.github.stem.runtime
 
 import izumi.reflect.Tag
 import io.github.stem.data.AlgebraCombinators.ImpossibleTransitionException
-import io.github.stem.data.{AlgebraCombinators, Tagging, Versioned}
+import io.github.stem.data.{AlgebraCombinators, Combinators, Tagging, Versioned}
 import io.github.stem.journal.EventJournal
 import io.github.stem.snapshot.{KeyValueStore, MemoryKeyValueStore, Snapshotting}
 import zio.{Ref, _}
@@ -50,7 +50,7 @@ class KeyedAlgebraCombinators[Key: Tag, State: Tag, Event: Tag, Reject](
   userBehaviour: Fold[State, Event],
   errorHandler: Throwable => Reject,
   algebraCombinatorConfig: AlgebraCombinatorConfig[Key, State, Event]
-) extends AlgebraCombinators.Service[State, Event, Reject] {
+) extends Combinators[State, Event, Reject] {
   import algebraCombinatorConfig._
   type Offset = Long
 

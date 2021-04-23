@@ -4,18 +4,18 @@ import io.github.stem.StemApp
 import io.github.stem.communication.macros.RpcMacro
 import io.github.stem.communication.macros.annotations.MethodId
 import io.github.stem.data.AlgebraCombinators._
-import io.github.stem.data.{EventTag, StemProtocol, Tagging}
+import io.github.stem.data.{Combinators, EventTag, StemProtocol, Tagging}
 import io.github.stem.runtime.Fold
 import io.github.stem.runtime.Fold.impossible
 import io.github.stem.runtime.akka.StemRuntime.memoryStemtity
 import io.github.stem.runtime.akka.{EventSourcedBehaviour, KeyDecoder, KeyEncoder}
 import ledger.eventsourcing.events._
 import scalapb.TypeMapper
-import zio.IO
+import zio.{Has, IO}
 
 object AccountEntity {
   type Accounts = AccountId => AccountCommandHandler
-  type AccountCombinator = Combinators[AccountState, AccountEvent, String]
+  type AccountCombinator = Has[Combinators[AccountState, AccountEvent, String]]
 
   class AccountCommandHandler {
     type SIO[Response] = StemApp.SIO[AccountState, AccountEvent, String, Response]
